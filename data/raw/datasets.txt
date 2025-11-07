@@ -1,0 +1,7 @@
+https://disk.yandex.ru/d/wnr26LEyRfTfyA globsnow_archive_v3.tar.gz globsnow_archive_v3
+https://disk.yandex.ru/d/GlqsF4PNkg8xnQ globsnow_nrt.tar.gz globsnow_nrt
+https://disk.yandex.ru/d/EZiGPU4lopYh4w swe_era5.tar.gz swe_era5
+https://disk.yandex.ru/d/U_Q8CwKsriilQw ice_era5.tar.gz ice_era5
+https://disk.yandex.ru/d/4nFJ9lxhS6y6mQ time_invariant.tar.gz time_invariant
+https://disk.yandex.ru/d/bt6_RyxgJacq3A noaa_cdr_ice.tar.gz noaa_cdr_ice
+https://disk.yandex.ru/d/Kcp-eVXI5OndaA ghcn.tar.gz ghcn
