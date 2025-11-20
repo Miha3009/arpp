@@ -12,3 +12,4 @@ netCDF4
 cartopy
 tqdm
 h5netcdf
+dask
