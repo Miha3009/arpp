@@ -27,6 +27,7 @@ def process_period(year, period, dates, element, name):
             print(f"File not found {input_file}")
             continue
         ds = xr.open_dataset(input_file, engine="h5netcdf")
+        ds = ds.sel(lat=slice(40, None))
         if len(means) == 0:
             lat, lon = ds.lat.values.astype(np.float32), ds.lon.values.astype(np.float32)
         means.append(ds[element].values)

@@ -23,6 +23,7 @@ def process_mean(task):
             #print(f"Not found {file}")
             continue
         ds = xr.open_dataset(file, engine="h5netcdf")
+        ds = ds.sel(lat=slice(40, None))
         values = ds.swe.values
         if counts.max() == 0:
             mean = np.zeros_like(values, dtype=np.float32)

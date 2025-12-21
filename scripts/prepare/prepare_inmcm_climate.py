@@ -28,6 +28,7 @@ def process_element(element, period_name, period_count, to_index):
     shift = False
     for i, f in enumerate(files):
         ds = xr.open_dataset(f, engine="h5netcdf")
+        ds = ds.sel(lat=slice(40, None))
         values = ds[element].values
         if i == 0:
             lat = ds.lat.values.astype(np.float32)

@@ -13,3 +13,5 @@ cartopy
 tqdm
 h5netcdf
 dask
+lightgbm
+torch

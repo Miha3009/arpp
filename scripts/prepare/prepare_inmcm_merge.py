@@ -35,6 +35,7 @@ def months_diff(d1, d2):
 def load_file(task):
     date, element, input_file = task
     ds = xr.open_dataset(input_file, engine="h5netcdf")
+    ds = ds.sel(lat=slice(40, None))
     values = ds[element].values
     times = ds.time.values
     lat, lon = ds.lat.values, ds.lon.values
