@@ -192,10 +192,6 @@ class NeuralNetwork:
             elif self.verbose:
                 print(f'Epoch {epoch+1:3d}, train loss: {train_losses[-1]:8.4f}')
 
-        ds.set_variables(ds.variables[:-2])
-        if self.test is not None:
-            self.test.set_variables(self.test.variables[:-2])
-
         return train_losses, test_losses
 
     def predict(self, X):
