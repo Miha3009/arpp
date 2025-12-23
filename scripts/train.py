@@ -172,6 +172,19 @@ class ClimateDataset(IterableDataset):
             return ds.interp(lat=self.lat, lon=self.lon, method="linear", kwargs={"fill_value": "extrapolate"})
         return ds
 
+    def load_all(self):
+        self.add_extra('lat').add_extra('climate')
+
+        X, y, lat, climate = [], [], [], []
+        for X_batch, y_batch in self.loader:
+            X.append(X_batch[:, :-2])
+            y.append(y_batch)
+            lat.append(X_batch[:, -2])
+            climate.append(X_batch[:, -1])
+
+        self.set_variables(self.variables[:-2])
+        return torch.cat(X), torch.cat(y), torch.cat(lat), torch.cat(climate)
+
 def evaluate(ds, model, plot=False, figure_filepath=None):
     variant = ds.variant
     lead_times = ds.lead_times

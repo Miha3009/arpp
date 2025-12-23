@@ -165,32 +165,12 @@ class NeuralNetwork:
             return torch.clamp(y_pred + climate, min=0)
 
     def fit(self, ds):
-        ds.add_extra('lat').add_extra('climate')
-        X, y, lat, climate = [], [], [], []
-        for X_batch, y_batch in ds.loader:
-            X.append(X_batch[:, :-2])
-            y.append(y_batch)
-            lat.append(X_batch[:, -2])
-            climate.append(X_batch[:, -1])
-    
-        X = torch.cat(X).to(self.device)
-        y = torch.cat(y).to(self.device)
-        lat = torch.cat(lat).to(self.device)
-        climate = torch.cat(climate).to(self.device)
+        X, y, lat, climate = ds.load_all()
+        X, y, lat, climate = X.to(self.device), y.to(self.device), lat.to(self.device), climate.to(self.device)
 
         if self.test is not None:
-            self.test.add_extra('lat').add_extra('climate')
-            X_test, y_test, lat_test, climate_test = [], [], [], []
-            for X_batch, y_batch in self.test.loader:
-                X_test.append(X_batch[:, :-2])
-                y_test.append(y_batch)
-                lat_test.append(X_batch[:, -2])
-                climate_test.append(X_batch[:, -1])
-    
-            X_test = torch.cat(X_test).to(self.device)
-            y_test = torch.cat(y_test).to(self.device)
-            lat_test = torch.cat(lat_test).to(self.device)
-            climate_test = torch.cat(climate_test).to(self.device)
+            X_test, y_test, lat_test, climate_test = self.test.load_all()
+            X_test, y_test, lat_test, climate_test = X_test.to(self.device), y_test.to(self.device), lat_test.to(self.device), climate_test.to(self.device)
 
         train_losses, test_losses = [], []
         for epoch in range(self.epochs):
