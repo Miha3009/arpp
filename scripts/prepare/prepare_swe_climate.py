@@ -13,33 +13,41 @@ climate_output_path = "../../data/climate"
 def process_mean(task):
     element, input_files, output_file = task
     if os.path.exists(output_file):
+        print(output_file)
         return
 
     print(f"Process {output_file}")
 
-    counts = np.array([0])
+    data_list = []
+    years = []
+    
     for file in input_files:
         if not os.path.exists(file):
-            #print(f"Not found {file}")
             continue
         ds = xr.open_dataset(file, engine="h5netcdf")
         ds = ds.sel(lat=slice(40, None))
-        values = ds.swe.values
-        if counts.max() == 0:
-            mean = np.zeros_like(values, dtype=np.float32)
-            counts = np.zeros_like(values, dtype=np.int32)
-            lat = ds.lat.values
-            lon = ds.lon.values
-        mask = ~np.isnan(values)
-        mean[mask] += values[mask]
-        counts[mask] += 1
+        data_list.append(ds.swe.values)
+        years.append(int(os.path.basename(file)[:4]))
+        if len(data_list) == 1:
+            lat, lon = ds.lat.values, ds.lon.values
 
-    if counts.max() == 0:
+    if len(data_list) < 2:
         return
 
-    mean[counts > 0] /= counts[counts > 0]
-    arr = xr.DataArray(mean, dims=["lat", "lon"], coords={"lat": lat, "lon": lon}, name="swe")
-    arr.to_netcdf(output_file, engine="h5netcdf")
+    data_array = np.array(data_list)
+    years_norm = np.array(years) - np.array(years).min()
+    
+    mean = np.mean(data_array, axis=0)
+    x_centered = years_norm - np.mean(years_norm)
+    trend = np.tensordot(x_centered, data_array, axes=(0, 0)) / np.sum(x_centered**2)
+
+    ds_out = xr.Dataset({
+        'swe_mean': (['lat', 'lon'], mean),
+        'swe_trend': (['lat', 'lon'], trend),
+        'swe_year_mean': ([], np.mean(years)),
+    }, coords={'lat': lat, 'lon': lon})
+
+    ds_out.to_netcdf(output_file, engine="h5netcdf")
 
 def process_element(element, input_directory):
     output_directory = f"{climate_output_path}/week/{element}"

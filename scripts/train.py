@@ -6,26 +6,44 @@ import os
 from pathlib import Path
 from matplotlib import pyplot as plt
 import pandas as pd
+import json
 
 current_dir = Path(__file__).parent
+datasets_dir = current_dir / '../data/datasets'
 default_extra_variables = ['cos_lat', 'sin_lon', 'cos_lon', 'sin_period', 'cos_period']
-all_extra_variables = default_extra_variables + ['lat', 'lon', 'period', 'climate']
+all_extra_variables = default_extra_variables + ['lat', 'lon', 'period', 'year', 'climate']
 
 def make_train_test(variant, firstYear, separateYear, lastYear, args={}):
-    dsTrain = ClimateDataset(variant, years=range(firstYear, separateYear), **args)
-    dsTest = ClimateDataset(variant, years=range(separateYear, lastYear+1), **args)
+    dsTrain = ClimateDataset(variant, years=list(range(firstYear, separateYear)), **args)
+    dsTest = ClimateDataset(variant, years=list(range(separateYear, lastYear+1)), **args)
     return dsTrain, dsTest
 
+def load_dataset(name, filename=None):
+    if filename == None:
+        filename = datasets_dir / f'{name}.json'
+    with open(filename, 'r') as f:
+        args = json.load(f)
+        args['temporary'] = False
+        return ClimateDataset(**args)
+
+def load_datasets(name):
+    return load_dataset(f'{name}_train'), load_dataset(f'{name}_test')
+
 class ClimateDataset(IterableDataset):
-    def __init__(self, variant, periods=None, data_path=current_dir / '../data', years=list(range(1991, 2020)),
-                 variables=None, lead_times=[0], batch_size=1000, normed=False, cache_level=0,
-                 loader_type="point", loader_opts={}):
+    def __init__(self, variant, name='', periods=None, data_path=current_dir / '../data', years=list(range(1991, 2020)),
+                 variables=None, lead_times=[0], batch_size=1000, normed=True, cache_level=0,
+                 loader_type="point", loader_opts={}, climate_trend=False, temporary=False):
+        self.init_args = locals().copy()
+        del self.init_args['self']
+        del self.init_args['data_path']
+        if temporary:
+            return
         self.data_path = data_path
         self.train_path = f'{data_path}/train/{variant}'
         self.lead_times = np.array(lead_times)
         self.years = years
         self.variant = variant
-        self.batch_size = batch_size
+        self.batch_size = int(batch_size)
         self.normed = normed
         self.cache = {}
         self.cache_level = cache_level
@@ -38,6 +56,8 @@ class ClimateDataset(IterableDataset):
         self.loader_type = loader_type
         self.loader_opts = loader_opts
         self.clamp_value = 50 if self.variant == 'swe' else 1
+        self.climate_trend = climate_trend
+        self.name = name
 
         self.files = [f"{self.train_path}/anom/{y}{p:02d}.nc" for y in years for p in self.periods]
         self.files = [file for file in self.files if os.path.exists(file)]
@@ -68,10 +88,17 @@ class ClimateDataset(IterableDataset):
 
         self.climate = {}
         self.masks = {}
-        for p in self.periods:
+        self.trends = {}
+        self.trends_mean_year = {}
+        for p in range(1, self.period_count+1):
             climate_ds = xr.open_dataset(f"{self.train_path}/clim/{p:02d}.nc", engine="h5netcdf")
-            self.climate[p] = climate_ds[list(climate_ds.data_vars)[0]].values.ravel()
+            self.climate[p] = climate_ds[f'{self.variant}_mean'].values.ravel()
             self.masks[p] = torch.as_tensor((~np.isnan(self.climate[p])) & (self.climate[p] != 0))
+            for v in climate_ds.data_vars:
+                if self.climate_trend and 'trend' in v:
+                    base = v[:-6]
+                    self.trends_mean_year[base] = climate_ds[f'{base}_year_mean'].values
+                    self.trends[base] = self.unify(climate_ds, v, None, fillna=True)
             climate_ds.close()
 
         self.extra_data = {
@@ -96,6 +123,13 @@ class ClimateDataset(IterableDataset):
 
         self.loader = DataLoader(self, batch_size=None) #, num_workers=1 if self.loader_type == "sequence" else 4)
 
+    def save(self, name, filename=None):
+        if filename == None:
+            filename = datasets_dir / f'{name}.json'
+            self.init_args['name'] = name
+        with open(filename, 'w') as f:
+            json.dump(self.init_args, f)
+
     def __iter__(self):
         worker_info = get_worker_info()
         if self.loader_type == 'point':
@@ -104,6 +138,8 @@ class ClimateDataset(IterableDataset):
             yield from self.rebatch_loader(self.map_loader(worker_info))
         elif self.loader_type == 'sequence':
             yield from self.rebatch_loader(self.sequence_loader(self.loader_opts['len']), 1)
+        elif self.loader_type == 'sequence_map':
+            yield from self.rebatch_loader(self.sequence_map_loader(self.loader_opts['len']), 1)
         else:
             raise Exception(f"Unknown loader type {self.loader_type}")
 
@@ -139,14 +175,15 @@ class ClimateDataset(IterableDataset):
                 yield X.unsqueeze(0), y.unsqueeze(0), lat.unsqueeze(0)
 
     def sequence_loader(self, seq_len):
-        for i in range(len(self.files) - seq_len + 1):
-            has_lead_time = np.array([1 in self.cache[f'{self.files[i + j]}_lead_times'] for j in range(seq_len)])
-            if not np.all(has_lead_time):
-                continue
+        for i in range(len(self.files)):
+            filename = Path(self.files[i]).name
+            year, period = map(int, [filename[:4], filename[4:6]])
+            dates = [(year + (period-i-1)//self.period_count, (period-i-1)%self.period_count+1) for i in range(seq_len)]
+            files = [f"{self.train_path}/anom/{y}{p:02d}.nc" for y, p in dates[::-1]]
 
             mask = None
             for j in range(seq_len):
-                period = self.files_periods[self.files[i + j]]
+                period = int(Path(files[j]).name[4:6])
                 if mask is None:
                     mask = self.masks[period]
                 else:
@@ -154,15 +191,51 @@ class ClimateDataset(IterableDataset):
 
             if mask.sum() == 0:
                 continue
-            
-            X, y, lat = [], [], []
-            for j in range(seq_len):
-                X_frame, y_frame, lat_frame = self.load_file(self.files[i + j], 1)
-                X.append(X_frame.reshape(-1, X_frame.shape[-1])[mask])
-                y.append(y_frame.ravel()[mask])
-                lat.append(lat_frame.ravel()[mask])
-            X, y, lat = torch.stack(X), torch.stack(y), torch.stack(lat)
-            yield X, y, lat
+
+            for lead_time in self.lead_times:
+                if self.check_lead_times(files, lead_time):
+                    continue
+
+                X, y, lat = [], [], []
+                for j in range(seq_len):
+                    X_frame, y_frame, lat_frame = self.load_file(files[j], lead_time)
+                    X.append(X_frame.reshape(-1, X_frame.shape[-1])[mask])
+                    y.append(y_frame.ravel()[mask])
+                    lat.append(lat_frame.ravel()[mask])
+                X, y, lat = torch.stack(X), torch.stack(y), torch.stack(lat)
+                yield X, y, lat
+
+    def sequence_map_loader(self, seq_len):
+        for i in range(len(self.files)):
+            filename = Path(self.files[i]).name
+            year, period = map(int, [filename[:4], filename[4:6]])
+            dates = [(year + (period-i-1)//self.period_count, (period-i-1)%self.period_count+1) for i in range(seq_len)]
+            files = [f"{self.train_path}/anom/{y}{p:02d}.nc" for y, p in dates[::-1]]
+
+            for lead_time in self.lead_times:
+                if self.check_lead_times(files, lead_time):
+                    continue
+
+                X, y, lat = [], [], []
+                for j in range(seq_len):
+                    X_frame, y_frame, lat_frame = self.load_file(files[j], lead_time)
+                    X.append(torch.nan_to_num(X_frame, nan=0.0).unsqueeze(0))
+                    y.append(torch.nan_to_num(y_frame, nan=0.0).unsqueeze(0))
+                    lat.append(lat_frame.unsqueeze(0))
+                X, y, lat = torch.stack(X), torch.stack(y), torch.stack(lat)
+                yield X, y, lat
+
+    def check_lead_times(self, files, lead_time):
+        for file in files:
+            if not f'{file}_lead_times' in self.cache:
+                if not os.path.exists(file):
+                    return True
+                ds = xr.open_dataset(file, engine="h5netcdf")
+                self.cache[f"{file}_lead_times"] = ds.lead_time.values
+                ds.close()
+            if not lead_time in self.cache[f'{file}_lead_times']:
+                return True
+        return False
 
     def rebatch_loader(self, loader, batch_dim=0):
         if self.cache_full:
@@ -178,7 +251,7 @@ class ClimateDataset(IterableDataset):
 
             if buf_size >= self.batch_size:
                 Xa, ya, lata = torch.cat(buf_X, batch_dim), torch.cat(buf_y, batch_dim), torch.cat(buf_lat, batch_dim)
-                n_full = buf_size // self.batch_size
+                n_full = int(buf_size // self.batch_size)
 
                 for i in range(n_full):
                     start = i * self.batch_size
@@ -204,20 +277,26 @@ class ClimateDataset(IterableDataset):
                 self.cache[f'batch_{batch_num:06d}'] = result
             yield result
         if self.cache_level == 2:
+            clear_cache = [k for k in self.cache if 'file' in k]
+            for k in clear_cache:
+                del self.cache[k]
             self.cache_full = True
 
     def load_file(self, file, lead_time):
-        field_id = f'{file}_{lead_time}'
-        if self.cache_level == 1 and field_id in self.cache:
+        field_id = f'file_{file}_{lead_time}'
+        if self.cache_level >= 1 and field_id in self.cache:
             return self.cache[field_id]
 
-        period = self.files_periods[file]
+        filename = Path(file).name
+        year, period = map(int, [filename[:4], filename[4:6]])
 
         ds = xr.open_dataset(file, engine="h5netcdf")
 
         features = []
         for variable in self.anom_variables:
             values = self.unify(ds, variable, lead_time).values
+            if self.climate_trend:
+                values -= self.trends[variable] * (year - self.trends_mean_year[variable])
             if self.normed:
                 values /= self.std[variable]
             features.append(values)
@@ -234,11 +313,17 @@ class ClimateDataset(IterableDataset):
                 features.append(features[-1] * 0 + np.cos(2 * np.pi * (period - 1) / self.period_count))
             elif variable == 'climate':
                 features.append(self.climate[period])
+            elif variable == 'year':
+                features.append(features[-1] * 0 + (year - 2005) / 10)
 
         X = np.stack(features, axis=-1)
         X = torch.as_tensor(X, dtype=torch.float32)
 
         y = ds["era5"].values
+        if self.climate_trend:
+            y = np.asarray(y - self.trends[self.variant] * (year - self.trends_mean_year[self.variant]),
+                           dtype=np.float32)
+
         y = torch.as_tensor(y, dtype=torch.float32)
         y = torch.clamp(y, -self.clamp_value, self.clamp_value)
 
@@ -255,8 +340,14 @@ class ClimateDataset(IterableDataset):
 
     def add_extra(self, variable):
         if not variable in self.variables and variable in all_extra_variables:
-            self.variables.append(variable)
-            self.extra_variables.append(variable)
+            self.set_variables(self.variables + [variable])
+        elif not variable in all_extra_variables:
+            raise ValueError(f'Незвестная переменная {variable}')
+        return self
+
+    def remove_extra(self, variable):
+        if variable in self.variables and variable in all_extra_variables:
+            self.set_variables([v for v in self.variables if v != variable])
         elif not variable in all_extra_variables:
             raise ValueError(f'Незвестная переменная {variable}')
         return self
@@ -269,12 +360,16 @@ class ClimateDataset(IterableDataset):
         self.extra_variables = [v for v in self.variables if v in all_extra_variables]
         self.variables = self.anom_variables + self.time_invariant_variables + self.extra_variables
         sample_ds.close()
+        invalid_cache = [k for k in self.cache if k.startswith('batch_') or k.startswith('file_')]
+        for k in invalid_cache:
+            del self.cache[k]
+        self.cache_full = False
 
-    def unify(self, ds, variable, lead_time):
+    def unify(self, ds, variable, lead_time, fillna=False):
         ds = ds[variable]
         if "lead_time" in ds.coords:
             ds = ds.sel(lead_time=lead_time)
-        if variable in ['sst', 'hice']:
+        if variable in ['sst', 'hice'] or fillna:
             ds = ds.fillna(0)
 
         if "lat" in ds.coords and "lon" in ds.coords:
@@ -299,7 +394,7 @@ class ClimateDataset(IterableDataset):
 
         return torch.cat(X, dim=batch_dim), torch.cat(y, dim=batch_dim), torch.cat(lat, dim=batch_dim)
 
-def evaluate(ds, model, plot=False, figure_filepath=None):
+def evaluate(ds, model):
     variant = ds.variant
     lead_times = ds.lead_times
 
@@ -308,55 +403,19 @@ def evaluate(ds, model, plot=False, figure_filepath=None):
         ds.lead_times = [lead_time]
         y_true, y_pred, lat = [], [], []
 
-        if plot:
-            lon = []
-            ds.add_extra('lon')
-
         for X_batch, y_batch, lat_batch in ds.loader:
-            y_true.append(y_batch)
             y_pred.append(model.predict(X_batch))
-            lat.append(lat_batch)
-            if plot:
-                lon.append(X_batch[:, ds.variables.index('lon')])
+            if ds.loader_type == 'sequence' or ds.loader_type == 'sequence_map':
+                y_true.append(y_batch[-1, :])
+                lat.append(lat_batch[-1, :])
+            elif ds.loader_type == 'point' or ds.loader_type == 'map':
+                y_true.append(y_batch)
+                lat.append(lat_batch)
+            if len(y_pred[-1].shape) < len(y_true[-1].shape):
+                y_pred[-1] = y_pred[-1].unsqueeze(0)
 
         y_true, y_pred, lat = torch.cat(y_true), torch.cat(y_pred), torch.cat(lat)
-
         losses.append(loss(variant, y_true, y_pred, lat).item())
-
-        if plot:
-            lon = torch.cat(lon)
-            df = pd.DataFrame({
-                'lat': lat.numpy(),
-                'lon': lon.numpy(),
-                'y_true': y_true.numpy(),
-                'y_pred': y_pred.numpy()
-            })
-
-            index = pd.MultiIndex.from_product([ds.lat, ds.lon], names=['lat', 'lon'])
-            loss_df = df.groupby(['lat', 'lon']).apply(
-                lambda g: loss(
-                    variant,
-                    torch.tensor(g['y_true'].values),
-                    torch.tensor(g['y_pred'].values),
-                    torch.ones(g['y_pred'].values.shape)*90
-                ).item(), include_groups=False
-            ).reset_index().set_index(['lat', 'lon']).reindex(index).reset_index()
-
-            loss_grid = loss_df.pivot(index='lat', columns='lon', values=0).values
-            vmax = 1 if variant == 'aice' else 200
-            plt.figure(figsize=(12, 4))
-            im = plt.imshow(loss_grid, cmap='jet',
-                vmin=0, vmax=vmax,
-                extent=[ds.lon.min(), ds.lon.max(), ds.lat.min(), ds.lat.max()],
-                origin='lower')
-            cbar = plt.colorbar(im, orientation='horizontal', aspect=100, pad=0.1)
-            cbar.set_label('Ошибка' if variant == 'aice' else 'Ошибка (мм)', fontsize=10)
-            variant_name = 'Водный эквивалент снега' if variant == 'swe' else 'Доля морского льда'
-            plt.title(f'{variant_name}, {model.name}, заблг. {lead_time + 1} месяц{"a" if lead_time > 0 else ""}')
-
-            if not figure_filepath is None:
-                plt.savefig(figure_filepath, dpi=200, bbox_inches='tight')
-            plt.show()
 
     return pd.DataFrame({
         'loss': losses,
@@ -367,7 +426,7 @@ def loss(variant, y_true, y_pred, lat):
     if variant == 'swe':
         return loss_acc(y_true, y_pred, lat)
     elif variant == 'aice':
-        return loss_acc(y_true, y_pred, lat)
+        return loss_acc(y_true, y_pred, lat) #loss_acc(y_true, y_pred, lat)
 
 def loss_rmse(y_true, y_pred, lat):
     weights = torch.cos(torch.deg2rad(lat))

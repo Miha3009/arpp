@@ -66,7 +66,7 @@ if __name__ == "__main__":
                 print(f"File not found {climate_file}")
                 continue
             ds = xr.open_dataset(climate_file, engine="h5netcdf")
-            climate[name][i+1] = ds[element].values
+            climate[name][i+1] = ds[f'{element}_mean'].values
         os.makedirs(f"{merge_output_path}/{name}", exist_ok=True)
 
     weeks, months = [], []

@@ -1,0 +1,1 @@
+{"variant": "aice", "name": "aice_3_1_1_point_test", "periods": null, "years": [2016, 2017, 2018, 2019], "variables": ["aice"], "lead_times": [3], "batch_size": 100000000.0, "normed": true, "cache_level": 2, "loader_type": "point", "loader_opts": {}, "climate_trend": false, "temporary": true}

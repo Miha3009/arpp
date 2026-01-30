@@ -38,8 +38,15 @@ class BaseModel:
             var_name = 'aice'
         self.idx = ds.variables.index(var_name)
         self.std = ds.std[var_name] if ds.normed else 1
+        self.loader_type = ds.loader_type
 
     def predict(self, X):
+        if self.loader_type == 'sequence':
+            return X[-1, :, self.idx] * self.std        
+        elif self.loader_type == 'map':
+            return X[:, :, :, self.idx] * self.std
+        elif self.loader_type == 'sequence_map':
+            return X[-1, :, :, :, self.idx] * self.std
         return X[:, self.idx] * self.std
     
     def save(self, filepath):
@@ -145,7 +152,7 @@ class BoostingModel:
 
 class NeuralNetwork:
     def __init__(self, variant, model_class, model_args, name='Нейросеть', epochs=100, lr=0.01, verbose=True, test=None,
-                 acc_steps=1, filepath=None, history=None, loss_type='rmse'):
+                 acc_steps=1, filepath='tmp', history=10, loss_type='rmse'):
         self.lr = lr
         self.epochs = epochs
         self.verbose = verbose
@@ -178,9 +185,9 @@ class NeuralNetwork:
         return torch.sqrt(torch.mean(((y_pred - y_true) ** 2) * weights))
 
     def loss_acc(self, y_pred, y_true, lat):
-        if y_true.dim() > y_pred.dim():
-            y_true = y_true[-1, ...]
-            lat = lat[-1, ...]
+        #if y_true.dim() > y_pred.dim():
+            #y_true = y_true[-1, ...]
+            #lat = lat[-1, ...]
 
         y_true, y_pred, lat = y_true.flatten(), y_pred.flatten(), lat.flatten()
         weights = torch.cos(torch.deg2rad(lat))
@@ -199,7 +206,9 @@ class NeuralNetwork:
             self.model.train()
             epoch_start = time.time()
             epoch_loss, sample_count = 0, 0
+            i = 0
             for X_batch, y_batch, lat_batch in ds.loader:
+                i += 1
                 X_batch, y_batch, lat_batch = X_batch.to(self.device), y_batch.to(self.device), lat_batch.to(self.device)
                 for step in range(self.acc_steps):
                     self.optimizer.zero_grad()
@@ -213,20 +222,28 @@ class NeuralNetwork:
                     n = len(y_batch.squeeze())
                     epoch_loss += loss.item() * n
                     sample_count += n
+                if self.verbose and epoch == 0 and i % 10 == 0:
+                    print(f'Batch {i:4d}, {epoch_loss / sample_count:8.4f}')
 
             self.train_losses.append(epoch_loss / sample_count)
 
             if self.test is not None:
                 self.model.eval()
                 with torch.no_grad():
-                    epoch_loss, sample_count = 0, 0
+                    y_true, y_pred, lat = [], [], []
                     for X_batch, y_batch, lat_batch in self.test.loader:
                         X_batch, y_batch, lat_batch = X_batch.to(self.device), y_batch.to(self.device), lat_batch.to(self.device)
-                        y_pred = self.model(X_batch).squeeze()
-                        n = len(y_batch.squeeze())
-                        epoch_loss += self.loss_acc(y_pred, y_batch.squeeze(), lat_batch.squeeze()).item() * n
-                        sample_count += n
-                    self.test_losses.append(-epoch_loss / sample_count)
+                        y_pred.append(self.model(X_batch).squeeze())
+                        if ds.loader_type == 'sequence' or ds.loader_type == 'sequence_map':
+                            y_true.append(y_batch[-1, :])
+                            lat.append(lat_batch[-1, :])
+                        elif ds.loader_type == 'point' or ds.loader_type == 'map':
+                            y_true.append(y_batch)
+                            lat.append(lat_batch)
+                        if len(y_pred[-1].shape) < len(y_true[-1].shape):
+                            y_pred[-1] = y_pred[-1].unsqueeze(0)
+                    y_true, y_pred, lat = torch.cat(y_true), torch.cat(y_pred), torch.cat(lat)
+                    self.test_losses.append(-self.loss_acc(y_pred, y_true, lat).item())
                 if self.verbose:
                     print(f'Epoch {epoch+1:3d}, train loss: {self.train_losses[-1]:8.4f}, test loss: ' +
                           f'{self.test_losses[-1]:8.4f}, time: {(time.time() - epoch_start):.2f}s')
@@ -441,3 +458,76 @@ class UNetModel(nn.Module):
         out_full = torch.zeros(x.size(0), 1, x.size(2), x.size(3), device=x.device)
         out_full[:, :, 1:, :] = out_cropped
         return out_full.squeeze(1)
+
+class ConvBlock3D(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv3d(in_ch, out_ch, 3, padding=1),
+            nn.ReLU(),
+            nn.Conv3d(out_ch, out_ch, 3, padding=1),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        return self.conv(x)
+
+class UNet3DModel(nn.Module):
+    def __init__(self, input_channels, base_channels=16):
+        super().__init__()
+        self.enc1 = ConvBlock3D(input_channels, base_channels)
+        self.pool1 = nn.MaxPool3d((1, 2, 2))
+        self.enc2 = ConvBlock3D(base_channels, base_channels*2)
+        self.pool2 = nn.MaxPool3d((1, 2, 2))
+        self.enc3 = ConvBlock3D(base_channels*2, base_channels*4)
+        self.pool3 = nn.MaxPool3d((1, 2, 2))
+        self.bottleneck = ConvBlock3D(base_channels*4, base_channels*8)
+        self.up3 = nn.ConvTranspose3d(base_channels*8, base_channels*4, (1, 2, 2), stride=(1, 2, 2))
+        self.dec3 = ConvBlock3D(base_channels*8, base_channels*4)
+        self.up2 = nn.ConvTranspose3d(base_channels*4, base_channels*2, (1, 2, 2), stride=(1, 2, 2))
+        self.dec2 = ConvBlock3D(base_channels*4, base_channels*2)
+        self.up1 = nn.ConvTranspose3d(base_channels*2, base_channels, (1, 2, 2), stride=(1, 2, 2))
+        self.dec1 = ConvBlock3D(base_channels*2, base_channels)
+        self.final_conv = nn.Conv3d(base_channels, 1, 1)
+
+    def forward(self, x):
+        x = x.permute(1, 4, 0, 2, 3)         # [batch, features, seq, 201, 1440]
+        x_cropped = x[:, :, :, 1:, :]
+        e1 = self.enc1(x_cropped)            # [batch,  b, seq, 200, 1440]
+        e2 = self.enc2(self.pool1(e1))       # [batch, 2b, seq, 100,  720]
+        e3 = self.enc3(self.pool2(e2))       # [batch, 4b, seq,  50,  360]
+        b = self.bottleneck(self.pool3(e3))  # [batch, 8b, seq,  25,  180]
+        d3 = self.up3(b)                     # [batch, 4b, seq,  50,  360]
+        d3 = torch.cat([d3, e3], dim=1)
+        d3 = self.dec3(d3)
+        d2 = self.up2(d3)                    # [batch, 2b, seq, 100,  720]
+        d2 = torch.cat([d2, e2], dim=1)
+        d2 = self.dec2(d2)
+        d1 = self.up1(d2)                    # [batch,  b, seq, 200, 1440]
+        d1 = torch.cat([d1, e1], dim=1)
+        d1 = self.dec1(d1)
+        out_cropped = self.final_conv(d1)    # [batch,  1, seq, 200, 1440]
+        out_full = torch.zeros(x.size(0), 1, x.size(2), x.size(3), x.size(4), device=x.device)
+        out_full[:, :, :, 1:, :] = out_cropped
+        r = out_full[:, :, -1, :, :].squeeze()
+
+        return r            # [batch, seq, 201, 1440]
+
+class CNNModel(nn.Module):
+    def __init__(self, input_channels, base_channels=32):
+        super().__init__()
+        self.conv1 = nn.Conv2d(input_channels, base_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(base_channels, base_channels*2, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(base_channels*2, base_channels, kernel_size=3, padding=1)
+        self.final_conv = nn.Conv2d(base_channels, 1, kernel_size=1)
+
+        self.relu = nn.ReLU()
+    
+    def forward(self, x):
+        x = x.permute(0, 3, 1, 2)  # [batch, features, 201, 1440]
+        
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.relu(self.conv3(x))
+        x = self.final_conv(x)
+        return x.squeeze(1)

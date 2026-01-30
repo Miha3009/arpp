@@ -1,0 +1,1 @@
+{"variant": "swe", "name": "swe_3_1_1_seq_test", "periods": null, "years": [2016, 2017, 2018, 2019], "variables": ["swe"], "lead_times": [3], "batch_size": 50000, "normed": true, "cache_level": 2, "loader_type": "sequence", "loader_opts": {"len": 4}, "climate_trend": false, "temporary": true}

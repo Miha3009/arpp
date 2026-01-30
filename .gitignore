@@ -6,4 +6,5 @@
 *.npz
 scripts/.ipynb_checkpoints
 scripts/anaconda_projects
+*.model
 *.pyc

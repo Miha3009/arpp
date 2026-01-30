@@ -160,7 +160,7 @@ if __name__ == "__main__":
                 print(f"File not found {climate_file}")
                 continue
             ds = xr.open_dataset(climate_file, engine="h5netcdf")
-            climate[element][i+1] = ds[element].values
+            climate[element][i+1] = ds[f'{element}_mean'].values
 
     for year in range(1991, 2020):
         for week in range(1, 53):
@@ -175,7 +175,7 @@ if __name__ == "__main__":
                 print(f"File not found {climate_file}")
                 continue
             ds = xr.open_dataset(climate_file, engine="h5netcdf")
-            climate[element][i+1] = ds[element].values
+            climate[element][i+1] = ds[f'{element}_mean'].values
 
     data = defaultdict(dict)
     loaded = {}

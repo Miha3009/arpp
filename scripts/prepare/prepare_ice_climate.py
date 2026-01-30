@@ -6,7 +6,6 @@ import xarray as xr
 from collections import defaultdict
 
 era5_input_path = "../../data/prepare/era5_ice"
-noaa_input_path = "../../data/prepare/noaa_ice"
 climate_output_path = "../../data/climate"
 
 def process_mean(task):
@@ -17,28 +16,36 @@ def process_mean(task):
 
     print(f"Process {output_file}")
 
-    count = 0
-    for i, file in enumerate(input_files):
+    data_list = []
+    years = []
+    
+    for file in input_files:
         if not os.path.exists(file):
-            print(f"Not found {file}")
             continue
         ds = xr.open_dataset(file, engine="h5netcdf")
         ds = ds.sel(lat=slice(40, None))
-        values = ds.ice.values
-        if i == 0:
-            mean = values
-            lat = ds.lat.values
-            lon = ds.lon.values
-        else:
-            mean += values
-        count += 1
+        data_list.append(ds.ice.values)
+        years.append(int(os.path.basename(file)[:4]))
+        if len(data_list) == 1:
+            lat, lon = ds.lat.values, ds.lon.values
 
-    if count == 0:
+    if len(data_list) < 2:
         return
 
-    mean /= count
-    arr = xr.DataArray(mean, dims=["lat", "lon"], coords={"lat": lat, "lon": lon}, name="ice")
-    arr.to_netcdf(output_file, engine="h5netcdf")
+    data_array = np.array(data_list)
+    years_norm = np.array(years) - np.array(years).min()
+    
+    mean = np.mean(data_array, axis=0)
+    x_centered = years_norm - np.mean(years_norm)
+    trend = np.tensordot(x_centered, data_array, axes=(0, 0)) / np.sum(x_centered**2)
+
+    ds_out = xr.Dataset({
+        'aice_mean': (['lat', 'lon'], mean),
+        'aice_trend': (['lat', 'lon'], trend),
+        'aice_year_mean': ([], np.mean(years)),
+    }, coords={'lat': lat, 'lon': lon})
+
+    ds_out.to_netcdf(output_file, engine="h5netcdf")
 
 def process_element(element, input_directory):
     output_directory = f"{climate_output_path}/month/{element}"
@@ -60,4 +67,3 @@ def process_element(element, input_directory):
 
 if __name__ == "__main__":
     process_element("era5_ice", era5_input_path)
-    process_element("noaa_ice", noaa_input_path)
