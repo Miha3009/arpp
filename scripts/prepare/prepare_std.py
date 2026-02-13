@@ -7,7 +7,7 @@ import shutil
 from sklearn.preprocessing import OneHotEncoder
 
 output_path = "../../data/train"
-years = list(range(1991, 2020))
+years = list(range(1991, 2021))
 
 def check_exists(files):
     for file in files:
@@ -50,8 +50,6 @@ def process_variable(variable, period_count):
                     counts[v] = np.zeros(shape, dtype=np.int32)
 
                 data = ds[v].values
-                if v == 'h500':
-                    print(data)
                 valid = ~np.isnan(data)
                 for lead_time in range(data.shape[0]):
                     sums[v] += np.where(valid[lead_time], data[lead_time] ** 2, 0)

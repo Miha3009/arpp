@@ -9,7 +9,7 @@ climate_input_path = "../../data/climate"
 merge_input_path = "../../data/merge"
 reference_grid = "../../data/climate/month/era5_ice/01.nc"
 output_path = "../../data/train"
-years = list(range(1991, 2020))
+years = list(range(1991, 2026))
 
 def check_exists(files):
     for file in files:
@@ -94,7 +94,7 @@ def process_file(period, inmcm_climate, era5_climate, inmcm_anomaly_path, inmcm_
         var_interp = ds[variable].fillna(0).interp(**interp_options)
         ds = ds.drop_vars(variable)
         ds = ds.rename({"lat": "lat1", "lon": "lon1"})
-        
+
         var_interp.values = var_interp.values + inmcm_climate - anomaly_bias
         if variable == 'aice':
             var_interp.values = np.minimum(1, np.maximum(0, var_interp.values))

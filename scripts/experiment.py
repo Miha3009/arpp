@@ -5,6 +5,7 @@ import cartopy.feature as cfeature
 import pandas as pd
 from pathlib import Path
 import torch
+import geopandas as gpd
 
 current_dir = Path(__file__).parent
 experiments_dir = current_dir / '../data/experiments'
@@ -78,6 +79,38 @@ def draw_swe_map(filename, data, title, label, vmin, vmax, cmap='RdBu_r'):
     else:
         plt.show()
 
+def draw_swe_map_etr(filename, data, title, label, vmin, vmax, cmap='RdBu_r'):
+    minlon, minlat, maxlon, maxlat = 27, 50, 56, 65
+    lons = np.arange(minlon, maxlon+0.1, 0.25)
+    lats = np.arange(minlat, maxlat+0.1, 0.25)
+    lon_grid, lat_grid = np.meshgrid(lons, lats)
+
+    fig = plt.figure(figsize=(8, 8))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    ax.set_extent([minlon, maxlon, minlat, maxlat], ccrs.PlateCarree())
+
+    mesh = ax.pcolormesh(lon_grid, lat_grid, data,
+                         cmap=cmap,
+                         vmin=vmin,
+                         vmax=vmax,
+                         shading='gouraud',
+                         rasterized=True)
+    
+    ax.add_feature(cfeature.BORDERS, linewidth=1, zorder=2)
+    gdf = gpd.read_file('../data/raw/time_invariant/ne_10m_admin_1_states_provinces.zip')
+    russia_regions = gdf[gdf['admin'] == 'Russia']
+    ax.add_geometries(russia_regions.geometry, crs=ccrs.PlateCarree(),
+                      edgecolor='k', facecolor='none', linewidth=0.5, linestyle=':', zorder=3)
+    plt.title(title)
+
+    cbar = plt.colorbar(mesh, orientation='vertical', pad=0.04, shrink=0.5)
+    cbar.set_label(label, fontsize=12)
+    if filename is not None:
+        plt.savefig(filename, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+    else:
+        plt.show()
+
 def draw_ice_map_rmse(filename, data, title):
     draw_ice_map(filename, data, title, 'RMSE (доля)', 0, 0.5, cmap='RdBu_r')
 
@@ -89,16 +122,16 @@ def draw_ice_map_improve(filename, data, title):
     draw_ice_map(filename, data, title, 'RMSE (доля)', -0.3, 0.3, cmap='PiYG')
 
 def draw_swe_map_rmse(filename, data, title):
-    draw_swe_map(filename, data, title, 'RMSE (мм)', 0, 50, cmap='YlOrRd')
+    draw_swe_map_etr(filename, data, title, 'RMSE (мм)', 0, 50, cmap='YlOrRd')
 
 def draw_swe_map_corr(filename, data, title):
-    draw_swe_map(filename, data, title, 'Корреляция аномалий', -1, 1, cmap='RdBu_r')
+    draw_swe_map_etr(filename, data, title, 'Корреляция аномалий', -1, 1, cmap='RdBu_r')
 
 def draw_swe_map_rmse_improve(filename, data, title):
-    draw_swe_map(filename, data, title, 'RMSE (мм)', -15, 15, cmap='PiYG')
+    draw_swe_map_etr(filename, data, title, 'RMSE (мм)', -15, 15, cmap='PiYG')
 
 def draw_swe_map_corr_improve(filename, data, title):
-    draw_swe_map(filename, data, title, 'Корреляция аномалий', -0.5, 0.5, cmap='PiYG')
+    draw_swe_map_etr(filename, data, title, 'Корреляция аномалий', -0.5, 0.5, cmap='PiYG')
 
 def gen_models_df(model, ds):
     ds.add_extra('lon')
@@ -141,7 +174,7 @@ def calculate_metrics(group):
     
     return pd.Series([rmse, corr], index=['rmse', 'corr'])
 
-def calculate_spatial_metrics(model, ds):
+def calculate_spatial_metrics(model, ds, lats, lons):
     y_pred, y_true = [], []
     for X_batch, y_batch, _ in ds.loader:
         y_pred.append(model.predict(X_batch))
@@ -163,8 +196,6 @@ def calculate_spatial_metrics(model, ds):
     std_true = torch.std(y_true, dim=0)
     corr_map = cov / (std_pred * std_true + 1e-6)
 
-    lats = np.arange(40, 90.25, 0.25)
-    lons = np.arange(-180, 180, 0.25)
     df = pd.DataFrame({
         'lat': np.repeat(lats, len(lons)),
         'lon': np.tile(lons, len(lats)),
@@ -175,13 +206,13 @@ def calculate_spatial_metrics(model, ds):
     return df
 
 def save_experiment(name, model, ds, base=None):
+    lats = ds.lat
+    lons = ds.lon
     if ds.loader_type == 'map' or ds.loader_type == 'sequence_map':
-        df = calculate_spatial_metrics(model, ds)
+        df = calculate_spatial_metrics(model, ds, lats, lons)
     else:
         df = gen_models_df(model, ds)
         df = df.groupby(['lat', 'lon']).apply(calculate_metrics, include_groups=False).reset_index()
-    lats = np.arange(40, 90.25, 0.25)
-    lons = np.arange(-180, 180, 0.25)
     rmse_df = df.pivot(index='lat', columns='lon', values='rmse').reindex(index=lats, columns=lons)
     corr_df = df.pivot(index='lat', columns='lon', values='corr').reindex(index=lats, columns=lons)
     if not base is None:

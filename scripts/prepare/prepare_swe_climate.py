@@ -54,7 +54,7 @@ def process_element(element, input_directory):
     os.makedirs(output_directory, exist_ok=True)
 
     weeks = get_weeks()
-    dates = pd.date_range(f"1991-01-01", f"2019-12-31", freq="D")
+    dates = pd.date_range(f"1991-01-01", f"2020-12-31", freq="D")
     dates_group = defaultdict(list)
     for date in dates:
         week_key = f"{date.month:02d}{date.day:02d}"
@@ -74,4 +74,4 @@ def process_element(element, input_directory):
 
 if __name__ == "__main__":
     process_element("era5_swe", era5_input_path)
-    process_element("globsnow", globsnow_input_path)
+    #process_element("globsnow", globsnow_input_path)

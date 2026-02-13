@@ -47,7 +47,7 @@ def process_week(task):
     year, week = task
     dates = get_week_dates(year, week)
     process_period(year, week, dates, "swe", "era5_swe")
-    process_period(year, week, dates, "swe", "globsnow")
+    #process_period(year, week, dates, "swe", "globsnow")
 
 def process_month(task):
     year, month = task
@@ -55,11 +55,11 @@ def process_month(task):
     dates = pd.date_range(start=start, periods=start.days_in_month, freq='D')
     dates = get_week_dates(year, week)
     process_period(year, month, dates, "ice", "era5_ice")
-    process_period(year, month, dates, "ice", "noaa_ice")
+    #process_period(year, month, dates, "ice", "noaa_ice")
 
 if __name__ == "__main__":
-    for name, period, element in [("era5_swe", "week", "swe"), ("globsnow", "week", "swe"),
-                    ("era5_ice", "month", "ice"), ("noaa_ice", "month", "ice")]:
+    for name, period, element in [("era5_swe", "week", "swe"), #("globsnow", "week", "swe"),
+                                  ("era5_ice", "month", "aice")]: #("noaa_ice", "month", "ice")]:
         for i in range(52 if period == "week" else 12):
             climate_file = f"{climate_input_path}/{period}/{name}/{(i+1):02d}.nc"
             if not os.path.exists(climate_file):
@@ -70,7 +70,7 @@ if __name__ == "__main__":
         os.makedirs(f"{merge_output_path}/{name}", exist_ok=True)
 
     weeks, months = [], []
-    for year in range(1991, 2020):
+    for year in range(1991, 2026):
         for week in range(1, 53):
             weeks.append((year, week))
         for month in range(1, 13):

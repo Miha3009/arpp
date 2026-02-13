@@ -51,7 +51,7 @@ def process_element(element, input_directory):
     output_directory = f"{climate_output_path}/month/{element}"
     os.makedirs(output_directory, exist_ok=True)
 
-    dates = pd.date_range(f"1991-01-01", f"2019-12-31", freq="D")
+    dates = pd.date_range(f"1991-01-01", f"2020-12-31", freq="D")
     dates_group = defaultdict(list)
     for date in dates:
         dates_group[f"{date.month:02d}"].append(date)

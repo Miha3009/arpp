@@ -33,20 +33,29 @@ def months_diff(d1, d2):
     return months
 
 def load_file(task):
-    date, element, input_file = task
+    date, element, coords = task
+    input_file = f"{inmcm_input_path}/{element}/{date.year}{date.month:02d}.nc"
     ds = xr.open_dataset(input_file, engine="h5netcdf")
     ds = ds.sel(lat=slice(40, None))
+    lat, lon, times = ds.lat.values, ds.lon.values, ds.time.values
+    if not coords is None and len(coords[0]) != len(lat):
+        ds.close()
+        return [], None, None
+        #ds = ds.interp(lat=coords[0], lon=coords[1], method="linear", kwargs={"fill_value": "extrapolate"})
     values = ds[element].values
-    times = ds.time.values
-    lat, lon = ds.lat.values, ds.lon.values
+    ds.close()
+
     t0 = pd.to_datetime(times[0])
     out = []
     for i, t in enumerate(times):
         t_date = pd.to_datetime(t)
-        t_year = date.year if t_date.year == 1991 else date.year + 1 # Bug
+        t_year = t_date.year
+        if element in ice_elements: # Bug
+            t_year = date.year if t_date.year == 1991 else date.year + 1
         date_str = f"{t_year}{t_date.month:02d}{t_date.day:02d}"
         index_str = f"{element}_{t0.month:02d}"
-        out.append((date_str, index_str, (element, months_diff(t0, t), values[i, :, :])))
+        v = values[i, :, :]
+        out.append((date_str, index_str, (element, months_diff(t0, t), v)))
     return out, lat, lon
 
 def calc_mean_arr(task):
@@ -86,32 +95,31 @@ def calc_mean_arr(task):
 
 def process_period(year, merge_output_path, dates, elements, period, period_name):
     os.makedirs(merge_output_path, exist_ok=True)
-
     output_file = f"{merge_output_path}/{year}{period:02d}.nc"
     if os.path.exists(output_file):
         return
 
     print(f"Process {year}/{period:02d} {period_name}")
 
+    coords = data[f"coords_{period_name}"] if f"coords_{period_name}" in data else None
     tasks = []
     for date in dates:
         for element in elements:
-            date2 = date + pd.DateOffset(months=1) if element == 'swe' and (date.day != 1 or date.year != 1991 or date.month != 1) else date # Bug
-            input_file = f"{inmcm_input_path}/{element}/{date2.year}{date2.month:02d}.nc"
+            input_file = f"{inmcm_input_path}/{element}/{date.year}{date.month:02d}.nc"
             if input_file in loaded:
                 continue
             loaded[input_file] = True
             if not os.path.exists(input_file):
                 print(f"File not found {input_file}")
                 continue
-            tasks.append((date, element, input_file))
+            tasks.append((date, element, coords))
 
     if len(tasks) > 0:
         with ProcessPoolExecutor() as executor:
             for out, lat, lon in executor.map(load_file, tasks):
                 if f"coords_{period_name}" not in data:
                     if np.max(lon) > 180:
-                        data[f"shift_{period_name}"] = True
+                        #data[f"shift_{period_name}"] = True
                         lon = np.roll(((lon + 180) % 360) - 180, len(lon)//2)
                     data[f"coords_{period_name}"] = [lat.astype(np.float32), lon.astype(np.float32)]
                 for date_str, index_str, payload in out:
@@ -154,32 +162,32 @@ def process_ice(year, month):
 
 if __name__ == "__main__":
     for element in (main_elements + ["swe"]):
-        for i in range(52):
-            climate_file = f"{climate_input_path}/week/{element}/{(i+1):02d}.nc"
+        for i in range(1, 53):
+            climate_file = f"{climate_input_path}/week/{element}/{i:02d}.nc"
             if not os.path.exists(climate_file):
                 print(f"File not found {climate_file}")
                 continue
             ds = xr.open_dataset(climate_file, engine="h5netcdf")
-            climate[element][i+1] = ds[f'{element}_mean'].values
+            climate[element][i] = ds[f'{element}_mean'].values
 
-    for year in range(1991, 2020):
+    for year in range(1991, 2026):
         for week in range(1, 53):
             process_week(year, week)
             process_swe(year, week)
 
     climate = defaultdict(dict)
     for element in (main_elements + ice_elements):
-        for i in range(12):
-            climate_file = f"{climate_input_path}/month/{element}/{(i+1):02d}.nc"
+        for i in range(1, 13):
+            climate_file = f"{climate_input_path}/month/{element}/{i:02d}.nc"
             if not os.path.exists(climate_file):
                 print(f"File not found {climate_file}")
                 continue
             ds = xr.open_dataset(climate_file, engine="h5netcdf")
-            climate[element][i+1] = ds[f'{element}_mean'].values
+            climate[element][i] = ds[f'{element}_mean'].values
 
     data = defaultdict(dict)
     loaded = {}
-    for year in range(1991, 2020):
+    for year in range(1991, 2026):
         for month in range(1, 13):
             process_month(year, month)
             process_ice(year, month)

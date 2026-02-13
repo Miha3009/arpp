@@ -50,6 +50,6 @@ def process_file(date):
 if __name__ == "__main__":
     os.makedirs(era5_output_path, exist_ok=True)
 
-    dates = pd.date_range('1991-01-01', '2025-12-31', freq='ME')
+    dates = pd.date_range('2025-01-01', '2025-12-31', freq='ME')
     with ProcessPoolExecutor(max_tasks_per_child=1) as executor: # HDF5 has global state :(
         executor.map(process_file, dates)

@@ -244,7 +244,8 @@ class NeuralNetwork:
                             y_pred[-1] = y_pred[-1].unsqueeze(0)
                     y_true, y_pred, lat = torch.cat(y_true), torch.cat(y_pred), torch.cat(lat)
                     self.test_losses.append(-self.loss_acc(y_pred, y_true, lat).item())
-                if self.verbose:
+                    #self.test_losses.append(self.loss_rmse(y_pred, y_true, lat).item())
+                if self.verbose and (self.current_epochs < 10 or self.epochs < 300 or self.current_epochs % 10 == 9):
                     print(f'Epoch {epoch+1:3d}, train loss: {self.train_losses[-1]:8.4f}, test loss: ' +
                           f'{self.test_losses[-1]:8.4f}, time: {(time.time() - epoch_start):.2f}s')
             elif self.verbose:
@@ -340,13 +341,15 @@ def create_nn(variant, model_class, model_args, filepath=None, test=None, seed=4
     return NeuralNetwork(variant, model_class, model_args, filepath=filepath, test=test, **kwargs)
 
 class MLPModel(nn.Module):
-    def __init__(self, input_size, hidden_layers=[16, 8]):
+    def __init__(self, input_size, hidden_layers=[16, 8], dropout=0):
         super().__init__()
         net = []
         prev_size = input_size
         for size in hidden_layers:
             net.append(nn.Linear(prev_size, size))
             net.append(nn.ReLU())
+            if dropout > 0:
+                net.append(nn.Dropout(dropout))
             prev_size = size
         net.append(nn.Linear(prev_size, 1))
         self.net = nn.Sequential(*net)
@@ -440,8 +443,12 @@ class UNetModel(nn.Module):
     
     def forward(self, x):
         x = x.permute(0, 3, 1, 2)  # [batch, features, 201, 1440]
-        x_cropped = x[:, :, 1:, :]
-        e1 = self.enc1(x_cropped)
+        h, w = x.shape[2], x.shape[3]
+        pad_h = (8 - h % 8) % 8
+        pad_w = (8 - w % 8) % 8
+        x_padded = torch.nn.functional.pad(x, (0, pad_w, 0, pad_h), mode='reflect')
+
+        e1 = self.enc1(x_padded)
         e2 = self.enc2(self.pool1(e1))
         e3 = self.enc3(self.pool2(e2))
         b = self.bottleneck(self.pool3(e3))
@@ -454,10 +461,12 @@ class UNetModel(nn.Module):
         d1 = self.up1(d2)
         d1 = torch.cat([d1, e1], dim=1)
         d1 = self.dec1(d1)
-        out_cropped = self.final_conv(d1)
-        out_full = torch.zeros(x.size(0), 1, x.size(2), x.size(3), device=x.device)
-        out_full[:, :, 1:, :] = out_cropped
-        return out_full.squeeze(1)
+        out = self.final_conv(d1)
+    
+        if pad_h > 0 or pad_w > 0:
+            out = out[:, :, :h, :w]
+
+        return out.squeeze(1)
 
 class ConvBlock3D(nn.Module):
     def __init__(self, in_ch, out_ch):
@@ -514,20 +523,51 @@ class UNet3DModel(nn.Module):
         return r            # [batch, seq, 201, 1440]
 
 class CNNModel(nn.Module):
-    def __init__(self, input_channels, base_channels=32):
+    def __init__(self, input_channels, base_channels=32, layers_count=3, dropout=0, batch_norm=False):
         super().__init__()
-        self.conv1 = nn.Conv2d(input_channels, base_channels, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(base_channels, base_channels*2, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(base_channels*2, base_channels, kernel_size=3, padding=1)
-        self.final_conv = nn.Conv2d(base_channels, 1, kernel_size=1)
+        
+        net = []
+        prev_channels = input_channels
+        
+        for i in range(layers_count):
+            channels = base_channels
+            net.append(nn.Conv2d(prev_channels, channels, kernel_size=3, padding=1))
+            if batch_norm:
+                net.append(nn.BatchNorm2d(channels))
+            net.append(nn.ReLU(inplace=True))
+            if dropout > 0:
+                net.append(nn.Dropout2d(dropout))
+            prev_channels = channels
 
-        self.relu = nn.ReLU()
+        net.append(nn.Conv2d(prev_channels, 1, kernel_size=1))
+        self.net = nn.Sequential(*net)
     
     def forward(self, x):
         x = x.permute(0, 3, 1, 2)  # [batch, features, 201, 1440]
-        
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.relu(self.conv3(x))
-        x = self.final_conv(x)
+        x = self.net(x)
         return x.squeeze(1)
+
+class CNN3DModel(nn.Module):
+    def __init__(self, input_channels, base_channels=32, layers_count=3, dropout=0, batch_norm=False):
+        super().__init__()
+        
+        net = []
+        prev_channels = input_channels
+        
+        for i in range(layers_count):
+            channels = base_channels
+            net.append(nn.Conv3d(prev_channels, channels, kernel_size=3, padding=1))
+            if batch_norm:
+                net.append(nn.BatchNorm3d(channels))
+            net.append(nn.ReLU(inplace=True))
+            if dropout > 0:
+                net.append(nn.Dropout3d(dropout))
+            prev_channels = channels
+
+        net.append(nn.Conv3d(prev_channels, 1, kernel_size=1))
+        self.net = nn.Sequential(*net)
+    
+    def forward(self, x):
+        x = x.permute(0, 4, 1, 2, 3)
+        x = self.net(x)
+        return x.squeeze(1)[-1, :, :, :]

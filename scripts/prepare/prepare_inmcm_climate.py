@@ -8,7 +8,8 @@ from utils import get_weeks, week_elements, month_elements
 
 inmcm_input_path = "../../data/raw/inmcm"
 climate_output_path = "../../data/climate"
-years = np.arange(1991, 2020)
+max_year = 2020
+years = np.arange(1991, max_year+1)
 
 def process_element(element, period_name, period_count, to_index):
     output_directory = f"{climate_output_path}/{period_name}/{element}"
@@ -27,6 +28,9 @@ def process_element(element, period_name, period_count, to_index):
     years = {}
     shift = False
     for i, f in enumerate(files):
+        year = int(os.path.basename(f)[:4])
+        if year > max_year:
+            continue
         ds = xr.open_dataset(f, engine="h5netcdf")
         ds = ds.sel(lat=slice(40, None))
         values = ds[element].values
@@ -35,7 +39,6 @@ def process_element(element, period_name, period_count, to_index):
             lon = ds.lon.values.astype(np.float32)
             if np.max(lon) > 180:
                 lon = np.roll(((lon + 180) % 360) - 180, len(lon)//2)
-                shift = True
             for j in range(period_count):
                 data[j] = []
                 years[j] = []

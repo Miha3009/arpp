@@ -9,7 +9,7 @@ years = list(range(1991, 2026))
 months = [f"{m:02d}" for m in range(1, 13)]
 days = [f"{d:02d}" for d in range(1, 32)]
 
-client = cdsapi.Client()
+client = cdsapi.Client(sleep_max=5)
 
 for year in years:
     for month in months:
