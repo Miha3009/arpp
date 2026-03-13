@@ -8,12 +8,15 @@ from matplotlib import pyplot as plt
 import pandas as pd
 import json
 import pickle
+from collections import deque
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 
 current_dir = Path(__file__).parent
 datasets_dir = current_dir / '../data/datasets'
 tmp_dir = current_dir / '../data/tmp'
-default_extra_variables = ['cos_lat', 'sin_lon', 'cos_lon', 'sin_period', 'cos_period']
-all_extra_variables = default_extra_variables + ['lat', 'lon', 'period', 'year', 'climate']
+default_extra_variables = ['cos_lat', 'sin_lon', 'cos_lon', 'sin_period', 'cos_period', 'era']
+all_extra_variables = default_extra_variables + ['lat', 'lon', 'period', 'year', 'climate', 'lead_time']
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -74,6 +77,7 @@ class ClimateDataset(IterableDataset):
         self.clamp_value = 50 if self.variant == 'swe' else 1
         self.climate_trend = climate_trend
         self.name = name
+        self.open_files = deque()
 
         self.files = [f"{self.train_path}/anom/{y}{p:02d}.nc" for y in years for p in self.periods]
         self.files = [file for file in self.files if os.path.exists(file)]
@@ -114,7 +118,10 @@ class ClimateDataset(IterableDataset):
         self.trends_mean_year = {}
         for p in range(1, self.period_count+1):
             climate_ds = xr.open_dataset(f"{self.train_path}/clim/{p:02d}.nc", engine="h5netcdf")
-            self.climate[p] = self.unify(climate_ds, f'{self.variant}_mean', None).values.ravel()
+            climate_var = f'{self.variant}_mean'
+            if climate_var not in climate_ds.data_vars:
+                climate_var = self.variant
+            self.climate[p] = self.unify(climate_ds, climate_var, None).values.ravel()
             if self.mask is None:
                 self.mask = np.zeros(self.climate[p].shape[0]) == 0
             self.masks[p] = torch.as_tensor((~np.isnan(self.climate[p])) & (self.climate[p] != 0) & (self.mask.ravel()))
@@ -225,12 +232,6 @@ class ClimateDataset(IterableDataset):
 
             period = int(Path(files[-1]).name[4:6])
             mask = self.masks[period]
-            #for j in range(seq_len):
-            #    period = int(Path(files[j]).name[4:6])
-            #    if mask is None:
-            #        mask = self.masks[period]
-            #    else:
-            #        mask = mask & self.masks[period]
 
             if mask.sum() == 0:
                 continue
@@ -332,15 +333,41 @@ class ClimateDataset(IterableDataset):
                 del self.cache[k]
             self.cache['full'] = True
 
+    def open_file(self, file):
+        key = f'file_{file}'
+        if key in self.cache:
+            return self.cache[key]
+
+        if len(self.open_files) >= 5:
+            oldest = self.open_files.popleft()
+            self.cache.pop(oldest).close()
+
+        ds = xr.open_dataset(file, engine="h5netcdf")
+        self.cache[key] = ds
+        self.open_files.append(key)
+        return ds
+
+    def get_last_week(self, year, week, lead_time):
+        #start = datetime(year, 1, 1) + timedelta(days=7 * (week - 1))
+        #start = start.replace(day=1) - relativedelta(months=lead_time)
+        #start = start - timedelta(start.weekday() + 1)
+        #days = start.timetuple().tm_yday
+        #days -= (start.year % 4 == 0 and days > 60)
+        #return start.year, min((days - 1) // 7 + 1, 52)
+        week = year * 52 + week - 5 - lead_time*4
+        return week // 52, int(week % 52) + 1
+
     def load_file(self, file, lead_time):
         field_id = f'file_{file}_{lead_time}'
         if self.cache_level >= 1 and field_id in self.cache:
             return self.cache[field_id]
 
         filename = Path(file).name
+        #if lead_time == 0:
+        #    print(filename)
         year, period = map(int, [filename[:4], filename[4:6]])
 
-        ds = xr.open_dataset(file, engine="h5netcdf")
+        ds = self.open_file(file)
 
         features = []
         for variable in self.anom_variables:
@@ -365,6 +392,20 @@ class ClimateDataset(IterableDataset):
                 features.append(self.climate[period])
             elif variable == 'year':
                 features.append(features[-1] * 0 + (year - 2005) / 10)
+            elif variable == 'lead_time':
+                features.append(features[-1] * 0 + lead_time)
+            elif variable == 'era':
+                prev_year, prev_period = self.get_last_week(year, period, lead_time)
+                try:
+                    ds_prev = self.open_file(Path(file).parent / f'{prev_year}{prev_period:02d}.nc')
+                    values = self.unify(ds_prev, "era5", lead_time).values
+                    if self.normed:
+                        values /= self.std[self.variant]
+                    features.append(values)
+                except:
+                    features.append(self.extra_data['lat'] * 0)
+        if self.cache_level >= 1 and field_id in self.cache:
+            return self.cache[field_id]
 
         X = np.stack(features, axis=-1)
         X = torch.as_tensor(X, dtype=torch.float32)
@@ -383,9 +424,8 @@ class ClimateDataset(IterableDataset):
             mask = self.masks[period]
             X, y, lat = X.reshape(-1, len(self.variables))[mask], y.ravel()[mask], lat.ravel()[mask]
 
-        if self.cache_level == 1:
+        if self.cache_level >= 1:
             self.cache[field_id] = (X, y, lat)
-        ds.close()
         return (X, y, lat)
 
     def add_extra(self, variable):
@@ -434,7 +474,7 @@ class ClimateDataset(IterableDataset):
         return ds
 
     def load_all(self):
-        batch_dim = 1 if self.loader_type == 'sequence' else 0
+        batch_dim = 1 if self.loader_type == 'sequence' or self.loader_type == 'sequence_map' else 0
         X, y, lat = [], [], []
 
         for X_batch, y_batch, lat_batch in self.loader:

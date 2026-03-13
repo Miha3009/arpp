@@ -74,4 +74,4 @@ def process_element(element, input_directory):
 
 if __name__ == "__main__":
     process_element("era5_swe", era5_input_path)
-    #process_element("globsnow", globsnow_input_path)
+    process_element("globsnow", globsnow_input_path)

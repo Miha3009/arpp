@@ -392,22 +392,54 @@ class LSTMModel(nn.Module):
         return self.fc(lstm_out[-1, :, :])
     
 class TCNModel(nn.Module):
-    def __init__(self, input_size, channels=[8, 16], kernel_size=3):
+    def __init__(self, input_size, channels=[8, 16], kernel_size=3, seqlen=None):
         super().__init__()
+        self.seqlen = seqlen
         self.convs = nn.ModuleList()
         last_size = input_size
         for channel in channels:
             self.convs.append(nn.Conv1d(last_size, channel, kernel_size, padding=kernel_size // 2))
-            last_size = channel 
-        self.pool = nn.AdaptiveAvgPool1d(1)
+            last_size = channel
+        self.pool = nn.AdaptiveMaxPool1d(1)
         self.fc = nn.Linear(last_size, 1)
 
     def forward(self, x):
         # [seq_len, batch, features]
         x = x.permute(1, 2, 0)  # [batch, features, seq_len]
+        if self.seqlen is not None:
+            x = x[:, :, -self.seqlen:]
         for i in range(len(self.convs)):
             x = F.relu(self.convs[i](x))
         x = self.pool(x).squeeze(-1)  # [batch, channels]
+        return self.fc(x)
+
+class HybridTCNModel(nn.Module):
+    def __init__(self, input_size, conv_channels=[16, 32], mlp_layers=[64, 32], kernel_size=3):
+        super().__init__()
+        
+        self.convs = nn.ModuleList()
+        last_c = input_size
+        for c in conv_channels:
+            self.convs.append(nn.Conv1d(last_c, c, kernel_size, padding=kernel_size // 2))
+            last_c = c
+
+        self.mlp = nn.ModuleList()
+        last_m = conv_channels[-1]
+        for m in mlp_layers:
+            self.mlp.append(nn.Linear(last_m, m))
+            last_m = m
+            
+        self.fc = nn.Linear(last_m, 1)
+
+    def forward(self, x):
+        # [seq_len, batch, features] -> [batch, features, seq_len]
+        x = x.permute(1, 2, 0)
+    
+        for conv in self.convs:
+            x = F.relu(conv(x))
+        x = x[:, :, -1] 
+        for layer in self.mlp:
+            x = F.relu(layer(x))
         return self.fc(x)
 
 class ConvBlock2D(nn.Module):
