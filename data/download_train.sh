@@ -1,8 +1,8 @@
 #!/bin/bash
 
 FILENAME="train.tar.gz"
-URL=$(curl -s "https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=https://disk.yandex.ru/d/qJBuOXVNpWhz0Q" | grep -oP '"href":"\K[^"]+')
+URL=$(curl -s "https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=https://disk.yandex.ru/d/_wMOSXHTiGSLeA" | grep -oP '"href":"\K[^"]+')
 wget --quiet --show-progress -O "$FILENAME" "$URL"
-mkdir -p "train_old"
-tar -xzf "$FILENAME" --strip-components=1 -C "train_old"
+mkdir -p "train"
+tar -xzf "$FILENAME" --strip-components=1 -C "train"
 rm "$FILENAME"

@@ -180,6 +180,8 @@ class NeuralNetwork:
             lat = lat[-1, ...]
 
         y_true, y_pred, lat = y_true.flatten(), y_pred.flatten(), lat.flatten()
+        mask = ~torch.isnan(lat)
+        y_true, y_pred, lat = y_true[mask], y_pred[mask], lat[mask]
         weights = torch.cos(torch.deg2rad(lat))
 
         return torch.sqrt(torch.mean(((y_pred - y_true) ** 2) * weights))
@@ -190,6 +192,8 @@ class NeuralNetwork:
             #lat = lat[-1, ...]
 
         y_true, y_pred, lat = y_true.flatten(), y_pred.flatten(), lat.flatten()
+        mask = ~torch.isnan(lat)
+        y_true, y_pred, lat = y_true[mask], y_pred[mask], lat[mask]
         weights = torch.cos(torch.deg2rad(lat))
 
         cov = torch.sum(weights * y_true * y_pred)

@@ -15,7 +15,7 @@ from dateutil.relativedelta import relativedelta
 current_dir = Path(__file__).parent
 datasets_dir = current_dir / '../data/datasets'
 tmp_dir = current_dir / '../data/tmp'
-default_extra_variables = ['cos_lat', 'sin_lon', 'cos_lon', 'sin_period', 'cos_period', 'era']
+default_extra_variables = ['cos_lat', 'sin_lon', 'cos_lon', 'sin_period', 'cos_period', 'era', 'lead_time']
 all_extra_variables = default_extra_variables + ['lat', 'lon', 'period', 'year', 'climate', 'lead_time']
 
 class NumpyEncoder(json.JSONEncoder):
@@ -220,6 +220,7 @@ class ClimateDataset(IterableDataset):
                 flaty = y.reshape(-1)
                 flaty[~mask] = np.nan
                 y = flaty.reshape(y.shape)
+                lat[torch.isnan(y)] = np.nan
                 X, y = torch.nan_to_num(X, nan=0.0), torch.nan_to_num(y, nan=0.0)
                 yield X.unsqueeze(0), y.unsqueeze(0), lat.unsqueeze(0)
 
@@ -270,6 +271,7 @@ class ClimateDataset(IterableDataset):
                     flaty = y_frame.reshape(-1)
                     flaty[~mask] = np.nan
                     y_frame = flaty.reshape(y_frame.shape)
+                    lat_frame[torch.isnan(y_frame)] = np.nan
                     X.append(torch.nan_to_num(X_frame, nan=0.0).unsqueeze(0))
                     y.append(torch.nan_to_num(y_frame, nan=0.0).unsqueeze(0))
                     lat.append(lat_frame.unsqueeze(0))
@@ -418,7 +420,7 @@ class ClimateDataset(IterableDataset):
         y = torch.as_tensor(y, dtype=torch.float32)
         y = torch.clamp(y, -self.clamp_value, self.clamp_value)
 
-        lat = self.extra_data['lat']
+        lat = self.extra_data['lat'].clone()
 
         if self.loader_type == 'point':
             mask = self.masks[period]
@@ -516,10 +518,14 @@ def loss(variant, y_true, y_pred, lat):
         return loss_acc(y_true, y_pred, lat) #loss_acc(y_true, y_pred, lat)
 
 def loss_rmse(y_true, y_pred, lat):
+    mask = ~torch.isnan(lat)
+    y_true, y_pred, lat = y_true[mask], y_pred[mask], lat[mask]
     weights = torch.cos(torch.deg2rad(lat))
     return torch.sqrt(torch.mean(((y_pred - y_true) ** 2) * weights))
 
 def loss_acc(y_true, y_pred, lat):
+    mask = ~torch.isnan(lat)
+    y_true, y_pred, lat = y_true[mask], y_pred[mask], lat[mask]
     weights = torch.cos(torch.deg2rad(lat))
     cov = torch.sum(weights * y_true * y_pred)
     std_true = torch.sqrt(torch.sum(weights * y_true ** 2))
