@@ -4,9 +4,15 @@ import xarray as xr
 import os
 import numpy as np
 
-directory='/home/miha3009/work/weather/era5db/era5'
+directory='/home/miha3009/work/weather/patcher/era5'
 context = patcher.Context('../../db', 1)
-precision = {'t2m': 0.05, 'lsm': 0.01}
+precision = {'t2m': 0.05, 'lsm': 0.01, 'sd': 0.1, 'z': 1, 'sdor': 0.1, 'tp': 0.1, 'sden': 0.1}
+aliases = {'sden': 'rsn'}
+scale = {
+    'sd': 1000, # m to mm
+    'z': 1 / 9.8066, # geopotential to m
+    'tp': 24000 # m/hr to mm/day
+}
 
 def process_element(element):
     if os.path.exists(f'../../db/{element}.bin'):
@@ -18,7 +24,7 @@ def process_element(element):
         year = int(file[:4])
         print(f'Read {element}/{file}')
         ds = xr.open_dataset(f'{directory}/{element}/{file}')
-        vals = ds[element].values
+        vals = ds[aliases.get(element, element)].values * scale.get(element, 1)
         times = ds.valid_time.values
         data, dates = [], []
         for j in range(len(times)):
@@ -41,10 +47,15 @@ def process_element_static(element, origin_element):
 
     print('Prepare', element)
     ds = xr.open_dataset(f'../../data/{origin_element}_0_daily-mean.nc')
-    data = torch.from_numpy(ds[element].values[0, 360::-1, :].copy()).float()
+    data = torch.from_numpy(ds[element].values[0, 360::-1, :].copy()).float() * scale.get(element, 1)
     patcher.train_dict(context, [data], element, precision[element], True)
     patcher.save(context, [data], ['19910101'], element)
     patcher.aggregate(context, element, "", "")
 
-process_element('t2m')
-process_element_static('lsm', 'land_sea_mask')
+for element in ['t2m', 'sd', 'tp', 'sden']:
+    process_element(element)
+
+for element, origin_element in [('lsm', 'land_sea_mask'),
+                                ('z', 'geopotential'),
+                                ('sdor', 'standard_deviation_of_orography')]:
+    process_element_static(element, origin_element)

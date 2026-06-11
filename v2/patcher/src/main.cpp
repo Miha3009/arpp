@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
+#include <iomanip>
 
 #ifdef __linux__
 #include <malloc.h>
@@ -606,6 +607,11 @@ std::vector<torch::Tensor> load_climate(Context& context, const std::vector<Requ
     return results;
 }
 
+void print_progress(const std::string& msg, int progress, int total) {
+    int width = std::to_string(total).length();
+    std::cout << "\r" << msg << ": " << std::right << std::setw(width) << progress << "/" << total << std::flush;
+}
+
 void aggregate(Context& context, const std::string& element, const std::string& climateStartStr, const std::string& climateEndStr) {
     fs::path binPath = context.get_directory() / (element + ".bin");
     fs::path tmpPath = context.get_directory() / (element + ".tmp");
@@ -654,6 +660,8 @@ void aggregate(Context& context, const std::string& element, const std::string& 
 
     uint64_t totalBytes = 0;
     std::unordered_map<PatchKey, uint64_t> newIndex;
+    int spatialProgress = 0;
+    print_progress("Spatial", 0, spatialGroups.size());
     for (const auto& [spatialKey, times] : spatialGroups) {
         auto [x0, y0, tag] = spatialKey;
         std::vector<uint16_t> sortedTimes(times.begin(), times.end());
@@ -769,7 +777,10 @@ void aggregate(Context& context, const std::string& element, const std::string& 
             PatchKey key = {x0, y0, static_cast<uint16_t>(info.blockStart), 1, static_cast<uint16_t>(1 << (2 * stage)), tag};
             encode(out, info.block, precision, key, cctx, cdict, newIndex, totalBytes);
         }
+        spatialProgress++;
+        print_progress("Spatial", spatialProgress, spatialGroups.size());
     }
+    std::cout << std::endl;
     context.save_index(element, newIndex);
     in.close();
     out.close();
@@ -784,7 +795,8 @@ void aggregate(Context& context, const std::string& element, const std::string& 
     std::map<std::tuple<uint16_t, uint16_t, uint16_t>, std::vector<PatchKey>> temporalGroups;
     for (const auto& [key, offset] : newIndex) temporalGroups[{key.t0, key.tStep, key.tag}].push_back(key);
 
-    int temporalKeyNum = 0;
+    int temporalProgress = 0;
+    print_progress("Temporal", temporalProgress, temporalGroups.size());
     for (const auto& [temporalKey, patchKeys] : temporalGroups) {
         auto [t0, tStep, tag] = temporalKey;
         mapE = tStep == 0 ? 1 : findMapE(mapEVec, t0 + tStep * patchT - 1);
@@ -823,11 +835,13 @@ void aggregate(Context& context, const std::string& element, const std::string& 
                 }
             }
         }
+        temporalProgress++;
+        print_progress("Temporal", temporalProgress, temporalGroups.size());
 #ifdef __linux__
-        temporalKeyNum++;
-        if (temporalKeyNum % 10 == 0) malloc_trim(0);
+        if (temporalProgress % 10 == 0) malloc_trim(0);
 #endif
     }
+    std::cout << std::endl;
 
     context.save_index(element, newIndex);
     ZSTD_freeCCtx(cctx);

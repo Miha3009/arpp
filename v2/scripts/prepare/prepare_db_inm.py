@@ -6,13 +6,15 @@ import numpy as np
 from datetime import datetime, timedelta
 
 context = patcher.Context('../../db', 1)
-precision = {'inm_t2m': 0.05}
+precision = {'inm_t2m': 0.05, 'inm_swe': 0.1, 'inm_snow_cover': 0.01,
+             'inm_tp': 0.05, 'inm_mslp': 0.1}
+no_climate = ['inm_snow_cover']
 
 def process_element(element, element_inm):
     if os.path.exists(f'../../db/{element}.bin'):
         return
 
-    directory = f'../../../{element_inm}'
+    directory = f'../../../../{element_inm}'
     files = sorted(list(os.listdir(directory)))
     files = [f for f in files if f.endswith('nc')]
     k = 0
@@ -36,7 +38,17 @@ def process_element(element, element_inm):
         print(f'Save {element}')
         patcher.save(context, data, dates, element, tag=month)
     print(f'Aggregate {element}')
-    patcher.aggregate(context, element, "19910101", "20210430")
+    if element in no_climate:
+        patcher.aggregate(context, element, "", "")
+    else:
+        patcher.aggregate(context, element, "19910101", "20210430")
 
-process_element('inm_t2m', 'T2')
+for element, element_inm in [
+        ('inm_t2m', 'T2'),
+        ('inm_swe', 'SS'),
+        ('inm_snow_cover', 'SFR'),
+        ('inm_tp', 'PREC'),
+        ('inm_mslp', 'PS')
+    ]:
+    process_element(element, element_inm)
 
