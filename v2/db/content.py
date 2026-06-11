@@ -6,7 +6,7 @@ ELEMENTS = {
     "z": {"name": "Geopotential Height", "units": "m", "bin": "gc0kCd7_up27eUsQ", "idx": "gcDSne8jL7BksBrQ"},
     "inm_t2m": {"name": "INMCM6M Temperature", "units": "K", "bin": "XV2DzWxyt3Jn0g", "idx": "aJqvONOaQERVBw"},
     "inm_mslp": {"name": "INMCM6M Mean Sea Level Pressure", "units": "hPa", "bin": "gc4BFxoQkRnxHmLA", "idx": "gcPED_eMJnIH8-sA"},
-    "inm_swe": {"name": "INMCM6M Snow Water Equivalent", "units": "mm", "bin": "", "idx": ""},
+    "inm_swe": {"name": "INMCM6M Snow Water Equivalent", "units": "mm", "bin": "Y-FC3ck9XwES3Q", "idx": "UnLPQAGd_NDk1A"},
     "inm_tp": {"name": "INMCM6M Total Precipitation", "units": "mm/day", "bin": "gcI68lCXmfoH7-TA", "idx": "gclz1bDu14Oh7Odg"},
     "inm_snow_cover": {"name": "INMCM6M Snow Cover", "units": "%", "bin": "gc9jdqv0zNnidQDQ", "idx": "gcIatVOFmG0oGSyQ"},
     "t2m": {"name": "Temperature", "units": "K", "bin": "hvV4Y9aRuZYx-w", "idx": "KK-vrRnzX6n3LQ"},
