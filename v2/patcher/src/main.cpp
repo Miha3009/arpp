@@ -542,6 +542,9 @@ torch::Tensor ThreadPoolLoader::process(const Request& req) {
 
 std::vector<torch::Tensor> load(Context& context, const std::vector<Request>& requests) {
     std::shared_ptr<ThreadPoolLoader> threadPool = context.get_thread_pool();
+    for (const auto& req : requests) {
+        if (!context.has_config_param(req.element + "@precision")) context.load_index(req.element);
+    }
     std::vector<std::future<torch::Tensor>> futures;
     for (const auto& req : requests) futures.push_back(threadPool->enqueue(req));
     std::vector<torch::Tensor> results;
@@ -603,6 +606,9 @@ torch::Tensor process_climate(Context& context, const Request& req) {
 
 std::vector<torch::Tensor> load_climate(Context& context, const std::vector<Request>& requests) {
     std::vector<torch::Tensor> results;
+    for (const auto& req : requests) {
+        if (!context.has_config_param(req.element + "@precision")) context.load_index(req.element);
+    }
     for (const Request& req : requests) results.push_back(process_climate(context, req));
     return results;
 }
@@ -622,6 +628,7 @@ void aggregate(Context& context, const std::string& element, const std::string& 
 
     ZSTD_DCtx* dctx = ZSTD_createDCtx();
     if (!dctx) throw std::runtime_error("Failed to create decompression context");
+    context.load_index(element);
     ZSTD_DDict* ddict = context.get_ddict(element);
     auto index = context.get_index(element);
     float precision = context.get_config_param(element + "@precision");

@@ -11,12 +11,6 @@ Context::Context(const std::string& directory, size_t num_threads) {
     if (!fs::exists(p)) throw std::runtime_error("Directory does not exist: " + directory);
     this->directory = p;
     load_config();
-    for (const auto& entry : fs::directory_iterator(p)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".idx") {
-            std::string filename = entry.path().stem().string();
-            load_index(filename);
-        }
-    }
     threadPool = std::make_shared<ThreadPoolLoader>(this, num_threads);
 }
 
