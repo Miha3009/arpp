@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 directory='/home/miha3009/work/weather/patcher/era5'
 context = patcher.Context('../../db', 1)
-precision = {'t2m': 0.05, 'lsm': 0.01, 'sd': 0.1, 'z': 1, 'sdor': 0.1, 'tp': 0.1, 'sden': 0.1, 'pt': 0.25,
+precision = {'t2m': 0.05, 'lsm': 0.01, 'sd': 0.1, 'z': 1, 'sdor': 0.1, 'tp': 0.05, 'sden': 0.1, 'pt': 0.25,
              'snow_cover': 0.01, 'glaicer': 1}
 aliases = {'sden': 'rsn', 'pt': 'ptype'}
 scale = {
@@ -29,6 +29,9 @@ def process_element(element):
         print(f'Read {element}/{file}')
         ds = xr.open_dataset(f'{directory}/{element}/{file}')
         vals = ds[aliases.get(element, element)].values * scale.get(element, 1)
+        vals = np.nan_to_num(vals, nan=0.0)
+        if element == 'sd':
+            vals = np.clip(vals, 0, 5000)
         times = ds.valid_time.values
         data, dates = [], []
         for j in range(len(times)):

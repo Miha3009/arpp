@@ -6,8 +6,9 @@ import numpy as np
 from datetime import datetime, timedelta
 
 context = patcher.Context('../../db', 1)
-precision = {'inm_t2m': 0.05, 'inm_swe': 0.1, 'inm_snow_cover': 0.01,
-             'inm_tp': 0.05, 'inm_mslp': 0.1}
+precision = {'inm_t2m': 0.05, 'inm_swe': 0.1, 'inm_snow_cover': 0.01, 'inm_ww': 0.1,
+             'inm_tp': 0.05, 'inm_mslp': 0.1, 'inm_olr': 0.1, 'inm_hlt': 0.1,
+             'inm_u850': 0.05, 'inm_v850': 0.05, 'inm_h500': 0.1, 'inm_ts': 0.05}
 no_climate = ['inm_snow_cover']
 
 def process_element(element, element_inm):
@@ -48,7 +49,14 @@ for element, element_inm in [
         ('inm_swe', 'SS'),
         ('inm_snow_cover', 'SFR'),
         ('inm_tp', 'PREC'),
-        ('inm_mslp', 'PS')
+        ('inm_mslp', 'PS'),
+        ('inm_ww', 'WW'),
+        ('inm_u850', 'U850'),
+        ('inm_v850', 'V850'),
+        ('inm_h500', 'H500'),
+        ('inm_olr', 'OLR'),
+        ('inm_hlt', 'HLT'),
+        ('inm_ts', 'TS')
     ]:
     process_element(element, element_inm)
 

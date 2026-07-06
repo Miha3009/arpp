@@ -5,10 +5,10 @@ import sys
 import requests
 from pathlib import Path
 from tqdm import tqdm
-from content import CONFIG, ELEMENTS, ELEMENTS_INFO
+from content import CONFIG, ELEMENTS
 
 def download_file(file_id, output):
-    resp = requests.get(f"https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=gc{file_id}")
+    resp = requests.get(f"https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=https://disk.yandex.ru/d/{file_id}")
     resp.raise_for_status()
     download_url = resp.json()["href"]
     
@@ -30,7 +30,7 @@ def check_damaged():
     return complete, damaged, missing
 
 def format_elements_list(elements):
-    return '\n'.join(f"  - {element}: {ELEMENTS_INFO[element]['name']} ({ELEMENTS_INFO[element]['units']})" for element in elements)
+    return '\n'.join(f"  - {element}: {ELEMENTS[element]['name']} ({ELEMENTS[element]['units']})" for element in elements)
 
 def download_elements():
     if not os.path.exists("config.bin"):
@@ -57,7 +57,7 @@ def download_elements():
     for element in to_download:
         bin_path = f"{element}.bin"
         idx_path = f"{element}.idx"
-        link_bin, link_idx = ELEMENTS[element]
+        link_bin, link_idx = ELEMENTS[element]['bin'], ELEMENTS[element]['idx']
 
         download_file(link_bin, bin_path)
         download_file(link_idx, idx_path)
