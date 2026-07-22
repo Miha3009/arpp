@@ -37,11 +37,11 @@ class PatchDataset(Dataset):
             x.setdefault("y_max", 361)
             x.setdefault("batch_size", 8)
             x.setdefault('lead_time_range', (0, 119))
-            x['t_min'] = (datetime.strptime(x['t_min'], '%Y%m%d') - datetime(1970, 1, 1)).days + self.era_time_width
-            x['t_max'] = (datetime.strptime(x['t_max'], '%Y%m%d') - datetime(1970, 1, 1)).days
             x['lead_time_range'] = (max(x['lead_time_range'][0], self.inm_time_width),
                                               max(x['lead_time_range'][1], self.inm_time_width))
-            x['doy_to_years'] = self.get_doy_to_years(x['t_min'], x['t_max'])
+            x['t_min'] = (datetime.strptime(x['t_min'], '%Y%m%d') - datetime(1970, 1, 1)).days
+            x['t_max'] = (datetime.strptime(x['t_max'], '%Y%m%d') - datetime(1970, 1, 1)).days
+            x['doy_to_years'] = self.get_doy_to_years(x['t_min'], x['t_max'] - x['lead_time_range'][0])
             self.modes[mode] = x
         self.mode = 'train'
         self.mask = mask
@@ -70,45 +70,89 @@ class PatchDataset(Dataset):
             seed = self.fix_seed
         rng = np.random.RandomState(seed)
         mode = self.modes[self.mode]
+        lead_min, lead_max = mode['lead_time_range']
         n = mode['epoch_size'] * mode['batch_size']
         if self.mask is None:
             x = rng.randint(mode['x_min'], mode['x_max'] + 1, size=n)
             y = rng.randint(mode['y_min'], mode['y_max'] + 1, size=n)
-            t = rng.randint(mode['t_min'], mode['t_max'] + 1, size=n)
+            t = rng.randint(mode['t_min'], mode['t_max'] - lead_min, size=n)
             self.xyt = list(zip(x, y, t))
         elif self.mask == 'snow':
             x_size, y_size = mode['x_max'] - mode['x_min'], mode['y_max'] - mode['y_min']
             req = patcher.Request('sd', mode['x_min'], mode['y_min'], '19800101', x_size, y_size, 365, 1, 1)
             climate = patcher.load_climate(self.context, [req])[0] > 4
+            days = np.array([int(k) for k in mode['doy_to_years'].keys() if int(k) < 365], dtype=np.int32)
+            climate = climate[days, :, :]
             idx = torch.nonzero(climate)
             chosen = idx[rng.choice(len(idx), n, replace=True)]
             self.xyt = []
             for doy, y, x in chosen:
-                year = rng.choice(list(mode['doy_to_years'][int(doy)]))
-                date = datetime(year, 1, 1) + timedelta(days=int(doy))
+                day = int(days[int(doy)])
+                year = rng.choice(list(mode['doy_to_years'][day]))
+                date = datetime(year, 1, 1) + timedelta(days=day)
                 t = (date - datetime(1970, 1, 1)).days
-                self.xyt.append((mode['x_min'] + int(x), mode['y_min'] + int(y), t))
+                self.xyt.append((mode['x_min'] + int(x) // 4 * 4, mode['y_min'] + int(y) // 4 * 4, t))
         else:
             raise ValueError(f'Mask {self.mask} not found')
 
-        self.lead_times = rng.randint(mode['lead_time_range'][0], mode['lead_time_range'][1] + 1, size=n).tolist()
+        t_values = np.array([item[2] for item in self.xyt])
+        max_lead = mode['t_max'] - t_values
+        max_lead = np.clip(max_lead, lead_min, lead_max)
+        self.lead_times = rng.randint(lead_min, max_lead + 1).tolist()
+        return self
+
+    def set_full(self, mode):
+        mode = self.modes[mode]
+        lead_min, lead_max = mode['lead_time_range']
+        x_size = self.target_scale['xSize']
+        y_size = self.target_scale['ySize']
+        t_size = self.target_scale['tSize']
+
+        x_range = range(mode['x_min'] + x_size // 2, mode['x_max'] + 1, x_size)
+        y_range = range(mode['y_min'] + y_size // 2, mode['y_max'] + 1, y_size)
+        
+        start_date = datetime(1970, 1, 1) + timedelta(days=mode['t_min'])
+        end_date = datetime(1970, 1, 1) + timedelta(days=mode['t_max'])
+
+        tl = []
+        current = start_date.replace(day=1)
+        max_allowed = end_date + relativedelta(months=1)
+        while current <= end_date:
+            current = current.replace(year=current.year + 1, month=1) if current.month == 12 else current.replace(month=current.month + 1)
+            current2 = (current + relativedelta(months=1)) - timedelta(days=1)
+            for lead_time in range(lead_min, lead_max + t_size, t_size):
+                l = max(lead_min, min(lead_time, lead_max, (max_allowed - current).days))
+                if len(tl) > 0 and tl[-1][1] == l:
+                    break
+                tl.append(((current2 - datetime(1970, 1, 1)).days, l))
+
+        self.xy = [(x, y) for x in x_range for y in y_range]
+        self.xyt = [(x, y, t) for t, _ in tl for x, y in self.xy]
+        self.xyl = [(x, y, l) for _, l in tl for x, y in self.xy]
+        self.lead_times = [l for _, l in tl for x, y in self.xy]
+        self.t = defaultdict(int)
+        for t, l in tl:
+            self.t[t] += len(self.xy)
+
         return self
 
     def set_mode(self, mode):
         self.mode = mode
 
     def __len__(self):
-        return self.modes[self.mode]['epoch_size']
+        return int(np.ceil(len(self.xyt) / self.modes[self.mode]['batch_size']))
 
     def get_time_variable(self, dates, variable):
         if variable == 'year':
             return torch.tensor([d.year for d in dates], dtype=torch.float32)
+        elif variable == 'year_norm':
+            return (torch.tensor([d.year for d in dates], dtype=torch.float32) - 2000) / 10
         elif variable == 'day':
             return torch.tensor([d.timetuple().tm_yday for d in dates], dtype=torch.float32)
         elif variable == 'cos_day':
-            return torch.tensor([math.cos(2 * math.pi * d.timetuple().tm_yday / 365) for d in dates], dtype=torch.float32)
+            return torch.tensor(np.cos(2 * np.pi / 365 * np.array([d.timetuple().tm_yday for d in dates])), dtype=torch.float32)
         elif variable == 'sin_day':
-            return torch.tensor([math.sin(2 * math.pi * d.timetuple().tm_yday / 365) for d in dates], dtype=torch.float32)
+            return torch.tensor(np.sin(2 * np.pi / 365 * np.array([d.timetuple().tm_yday for d in dates])), dtype=torch.float32)
 
     def get_spatial_variable(self, lat, lon, variable):
         if variable == 'lat':
@@ -138,15 +182,18 @@ class PatchDataset(Dataset):
         x0, y0, _ = self.xyt[idx]
         date, _ = self.get_date(idx, s, is_target)
 
-        if variable in ['year', 'day', 'cos_day', 'sin_day']:
+        if variable in ['year', 'year_norm', 'day', 'cos_day', 'sin_day']:
             dates = [date + timedelta(days=int(i*s['tStep'])) for i in range(s['tSize'])]
             return self.get_time_variable(dates, variable), key, is_target
 
-        x = (x0 - s['xSize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep']
-        y = (y0 - s['ySize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] 
+        x = (x0 - s['xSize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixX' not in s else s['fixX']
+        y = (y0 - s['ySize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixY' not in s else s['fixY']
+        if s['xyStep'] == 1:
+            x = x // 4 * 4
+            y = y // 4 * 4
 
         if variable in ['lat', 'lon', 'cos_lat', 'cos_lon', 'sin_lon']:
-            lat = 0.25*torch.arange(y, y + s['xSize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
+            lat = 0.25*torch.arange(y, y + s['ySize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
             lon = 0.25*torch.arange(x, x + s['xSize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
             return self.get_spatial_variable(lat, lon, variable), key, is_target
 
@@ -160,7 +207,7 @@ class PatchDataset(Dataset):
         x0, y0, _ = self.xyt[idx]
         date, origin_date = self.get_date(idx, s, True)
 
-        if variable[4:] in ['year', 'day', 'cos_day', 'sin_day']:
+        if variable[4:] in ['year', 'year_norm', 'day', 'cos_day', 'sin_day']:
             dates = [date + timedelta(days=int(i*s['tStep'])) for i in range(s['tSize'])]
             return self.get_time_variable(dates, variable[4:]), key, is_target
 
@@ -168,11 +215,11 @@ class PatchDataset(Dataset):
             days = (date - origin_date).days
             return torch.tensor([days + i*s['tStep'] for i in range(s['tSize'])], dtype=torch.float32), key, is_target
 
-        x = (x0 // 4 - s['xSize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep']
-        y = (y0 // 4 - s['ySize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep']
+        x = (x0 // 4 - s['xSize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixX' not in s else s['fixX']
+        y = (y0 // 4 - s['ySize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixY' not in s else s['fixY']
 
         if variable[4:] in ['lat', 'lon', 'cos_lat', 'cos_lon', 'sin_lon']:
-            lat = torch.arange(y, y + s['xSize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
+            lat = torch.arange(y, y + s['ySize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
             lon = torch.arange(x, x + s['xSize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
             return self.get_spatial_variable(lat, lon, variable[4:]), key, is_target
 
@@ -182,7 +229,8 @@ class PatchDataset(Dataset):
     def __getitem__(self, idx):
         requests = []
         batch_size = self.modes[self.mode]['batch_size']
-        for i in range(batch_size):
+        current_batch_size = min(batch_size, len(self.xyt) - idx * batch_size)
+        for i in range(current_batch_size):
             for variable in self.input_variables:
                 if variable.startswith('inm_'):
                     requests += [self.get_inm_request(idx * batch_size + i, variable, s) for s in self.inm_scales]

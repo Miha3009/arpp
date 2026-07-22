@@ -22,10 +22,13 @@ def process_element(element, element_inm):
     for i, file in enumerate(files):
         data, dates = [], []
         year = int(file[5:9])
+        if year < 2024:
+            continue
         month = int(file[9:11])
         print(f'Read {element}/{file}')
         ds = xr.open_dataset(f'{directory}/{file}')
         vals = ds[element_inm].values
+        print(np.any(np.isnan(vals)))
         vals = np.roll(vals, 180, axis=3)
         base_date = datetime(year, month, 1)
         for j in range(vals.shape[1]):

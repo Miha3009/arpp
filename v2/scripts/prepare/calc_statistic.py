@@ -31,7 +31,7 @@ def generate_months(start_str, end_str):
 
 def process_variable(context, variable):
     stats = pd.read_csv(STATS_PATH)
-    if variable in list(stats['variable']) or variable == 'inm_snow_cover':
+    if variable in list(stats['variable']):
         return
 
     mn, mx, sum, sum2, cnt, nans, climate_sum = np.inf, -np.inf, 0, 0, 0, 0, 0
@@ -52,7 +52,7 @@ def process_variable(context, variable):
             result_climate[j] = torch.nan_to_num(result_climate[j], 0.0)
             x = result[j] + result_climate[j]
             nans += torch.sum(torch.isnan(x))
-            print(requests[i+j].t0, mn, mx, nans)
+            print(requests[i+j].t0, mn, mx, nans, torch.max(torch.abs(result[j])))
             min_val, linear_idx = torch.min(x.flatten(), dim=0)
             multi_idx = np.unravel_index(linear_idx.item(), x.shape)
             x = x[~torch.isnan(x)].reshape(-1)

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 directory='/home/miha3009/work/weather/patcher/era5'
 context = patcher.Context('../../db', 1)
 precision = {'t2m': 0.05, 'lsm': 0.01, 'sd': 0.1, 'z': 1, 'sdor': 0.1, 'tp': 0.05, 'sden': 0.1, 'pt': 0.25,
-             'snow_cover': 0.01, 'glaicer': 1}
+             'snow_cover': 0.01, 'glaicer': 1, 'sst': 0.05}
 aliases = {'sden': 'rsn', 'pt': 'ptype'}
 scale = {
     'sd': 1000, # m to mm
@@ -68,7 +68,7 @@ def process_snow_cover_from_swe():
         return
 
     start_date = datetime(1980, 1, 1)
-    end_date = datetime(2026, 6, 1)
+    end_date = datetime(2026, 6, 30)
 
     current_date = start_date
     block_size = 30
@@ -106,7 +106,7 @@ def process_glaicer_mask():
     patcher.save(context, [data], ['19910101'], element)
     patcher.aggregate(context, element, "", "")
 
-for element in ['t2m', 'sd', 'tp', 'sden', 'pt']:
+for element in ['t2m', 'sd', 'tp', 'sden', 'pt', 'sst']:
     process_element(element)
 
 for element, origin_element in [('lsm', 'land_sea_mask'),

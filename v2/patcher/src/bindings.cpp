@@ -25,7 +25,8 @@ PYBIND11_MODULE(patcher, m) {
         .def_readwrite("ySize", &Request::ySize)
         .def_readwrite("tSize", &Request::tSize)
         .def_readwrite("xyStep", &Request::xyStep)
-        .def_readwrite("tStep", &Request::tStep);
+        .def_readwrite("tStep", &Request::tStep)
+        .def_readwrite("tag", &Request::tag);
 
     m.def("train_dict", &train_dict, 
           "Train ZSTD dictionary from training data tensor",

@@ -19,4 +19,6 @@ sd,-0.0,5000.0,137.124,778.257,False,True
 sden,100.0,450.0,115.974,43.496,False,True
 tp,-0.0,749.05,2.46,6.658,False,True
 pt,0.0,8.0,1.852,1.991,False,False
+sst,-0.0,313.65,178.282,139.477,False,True
 snow_cover,0.0,1.0,0.15,0.351,False,False
+inm_snow_cover,0.0,1.0,0.11,0.296,False,False

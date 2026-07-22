@@ -20,6 +20,7 @@ ELEMENTS = {
     "t2m": {"name": "Temperature", "units": "K", "bin": "hvV4Y9aRuZYx-w", "idx": "KK-vrRnzX6n3LQ"},
     "sd": {"name": "Snow Depth", "units": "mm", "bin": "JFV0jr-MrN-Aug", "idx": "bEotTMdyA6Rr_g"},
     "sden": {"name": "Snow Density", "units": "kg/m³", "bin": "8phvdgRwrMCZMA", "idx": "By4lOKPrJ-kXqA"},
+    "sst": {"name": "Sea Surface Temperature", "units": "K", "bin": "ousG9zPVPfXO0w", "idx": "OyVEl387rsjV_Q"},
     "tp": {"name": "Total Precipitation", "units": "mm/day", "bin": "jVMJjMu0NGImHQ", "idx": "LKmw_Bw1tjwyjQ"},
     "pt": {"name": "Precipitation Type", "units": "Code table 4.201", "bin": "nahkKCOHjQhu_A", "idx": "qWaycFDRW_rpLg"},
     "snow_cover": {"name": "Snow Cover", "units": "%", "bin": "EOZYjCASyeQZaA", "idx": "RwhK4hAK_tzJbQ"}

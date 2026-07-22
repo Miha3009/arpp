@@ -812,6 +812,11 @@ void aggregate(Context& context, const std::string& element, const std::string& 
                     stage++;
                 }
             }
+            for (auto& [stg, info] : blocks) {
+                int sumSize = 1 << (2 * stg);
+                PatchKey key = {x0, y0, static_cast<uint16_t>(info.blockStart), 1, static_cast<uint16_t>(sumSize), tag};
+                encode(out, info.block, precision, key, cctx, cdict, newIndex, totalBytes);
+            }
         }
         for (auto [stage, info] : blocks) {
             PatchKey key = {x0, y0, static_cast<uint16_t>(info.blockStart), 1, static_cast<uint16_t>(1 << (2 * stage)), tag};
