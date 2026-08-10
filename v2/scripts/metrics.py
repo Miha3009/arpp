@@ -3,13 +3,20 @@ from saver import saveable
 
 @saveable
 class WeightedMSE:
-    def __init__(self, target_key, mean_dim=None):
+    def __init__(self, target_key, mean_dim=None, mask=[]):
         self.target_key = target_key
         self.mean_dim = mean_dim
+        self.mask = mask
 
     def __call__(self, output, target_dict):
         target = target_dict[self.target_key]
         lat = target_dict['lat']  # (lats,)
+        mask = torch.ones_like(target, dtype=torch.bool)
+        for key, op, v in self.mask:
+            if op == '>':
+                mask = mask & (target_dict[key] > v)
+            else:
+                mask = mask & (target_dict[key] < v)                
 
         weights = torch.cos(torch.deg2rad(lat))
         weights = weights.view(target.shape[0], 1, target.shape[2], 1)
@@ -17,7 +24,7 @@ class WeightedMSE:
         if self.mean_dim is not None:
             output, target, weights = output.mean(dim=self.mean_dim), target.mean(dim=self.mean_dim), weights.mean(dim=self.mean_dim)
 
-        return (((output - target) ** 2) * weights).mean()
+        return (((output - target) ** 2) * weights)[mask].mean()
 
 @saveable
 class EnsembleMSE:

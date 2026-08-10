@@ -5,6 +5,7 @@ import json
 import os
 from saver import saveable, load_from_config_content
 from collections import defaultdict
+from scales import normalize
 
 @saveable
 class DummyModel(nn.Module):
@@ -189,28 +190,27 @@ class MultiscaleNet(nn.Module):
         return scale, varname
     
     def forward(self, x):
-        mult = {'z': 100, 'sdor': 100, 'sd': 100, 'sden': 100, 'tp': 10}
         result = defaultdict(dict)
         for v in x.keys():
             scale, varname = self._get_scale_varname(v)
             if 'x' not in result[scale]:
                 result[scale]['x'] = []
             if len(x[v].shape) == 2:
-                result[scale][varname] = x[v] / mult.get(varname, 1)
+                result[scale][varname] = normalize(x[v], varname)
                 continue
 
             if 'inm' not in scale:
-                result[scale]['x'].append(x[v].unsqueeze(1))
+                result[scale]['x'].append(normalize(x[v].unsqueeze(1), varname))
                 continue
 
             if varname == 'snow_cover':
                 result[scale]['x'].append(x[v].mean(dim=1, keepdim=True))
             elif varname in self.variable_encoders and self.variable_encoders[varname] is not None:
                 B, _, T, H, W = x[v].shape
-                encoded = self.variable_encoders[varname].encode(x[v]).reshape(B, -1, T, H, W)
+                encoded = self.variable_encoders[varname].encode(normalize(x[v], varname)).reshape(B, -1, T, H, W)
                 result[scale]['x'].append(encoded)
             else:
-                raise ValueError(f'Encoder not found for {varname}')
+                result[scale]['x'].append(normalize(x[v].mean(dim=1, keepdim=True), varname))
 
         for scale in result.keys():
             result[scale]['x'] = torch.cat(result[scale]['x'], dim=1)
@@ -453,3 +453,53 @@ class SnowCoverNetV1(MultiscaleNet):
         output = torch.sigmoid(output)
 
         return output
+
+class TemporalEncoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim=32):
+        super().__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, 
+                           batch_first=True, 
+                           num_layers=1)
+        self.projection = nn.Linear(hidden_dim, hidden_dim)
+    
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        last = out[:, -1, :]
+        return self.projection(last)
+
+@saveable
+class SWENetV0(MultiscaleNet):
+    def __init__(self, variable_encoders, scales, hidden_dim=64):
+        super().__init__(variable_encoders)
+        self.scales = scales
+
+        self.encoders = nn.ModuleDict()
+        for s in scales:
+            self.encoders[s] = TemporalEncoder(scales[s]['channels'], hidden_dim)
+
+        self.cross_attention = nn.MultiheadAttention(hidden_dim, 4, batch_first=True)
+        
+        self.predictor = nn.Sequential(
+            nn.Linear(hidden_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)
+        )
+
+    def forward(self, x):
+        x = super().forward(x)
+        encoded = []
+        for s in self.scales:
+            _, _, T, H, W = x[s]['x'].shape
+            spatial = torch.cat([
+                x[s][sp][:, None, None, :, None].expand(-1, 1, T, -1, W) if 'lat' in sp
+                else x[s][sp][:, None, None, None, :].expand(-1, 1, T, H, -1)
+                for sp in self.scales[s]['spatial']
+            ], dim=1)
+            temporal = torch.cat([x[s][sp].unsqueeze(1) for sp in self.scales[s]['temporal']], dim=1)
+            temporal = temporal[:, :, :, None, None].expand(-1, -1, -1, H, W)
+            all_data = torch.cat([x[s]['x'], spatial, temporal], dim=1)
+            F = all_data.shape[1]
+            all_data = all_data.permute(0, 3, 4, 2, 1).reshape(-1, T, F)
+            encoded.append(encoders[s](all_data))
+
+        return None

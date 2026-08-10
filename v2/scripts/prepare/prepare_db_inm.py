@@ -6,9 +6,10 @@ import numpy as np
 from datetime import datetime, timedelta
 
 context = patcher.Context('../../db', 1)
-precision = {'inm_t2m': 0.05, 'inm_swe': 0.1, 'inm_snow_cover': 0.01, 'inm_ww': 0.1,
-             'inm_tp': 0.05, 'inm_mslp': 0.1, 'inm_olr': 0.1, 'inm_hlt': 0.1,
+precision = {'inm_t2m': 0.05, 'inm_swe': 0.001, 'inm_snow_cover': 0.01, 'inm_ww': 0.001,
+             'inm_tp': 0.001, 'inm_mslp': 0.1, 'inm_olr': 0.1, 'inm_hlt': 0.1,
              'inm_u850': 0.05, 'inm_v850': 0.05, 'inm_h500': 0.1, 'inm_ts': 0.05}
+log_scale = ['inm_tp', 'inm_swe', 'inm_ww']
 no_climate = ['inm_snow_cover']
 
 def process_element(element, element_inm):
@@ -22,14 +23,12 @@ def process_element(element, element_inm):
     for i, file in enumerate(files):
         data, dates = [], []
         year = int(file[5:9])
-        if year < 2024:
-            continue
         month = int(file[9:11])
         print(f'Read {element}/{file}')
         ds = xr.open_dataset(f'{directory}/{file}')
         vals = ds[element_inm].values
-        print(np.any(np.isnan(vals)))
-        vals = np.roll(vals, 180, axis=3)
+        if element in log_scale:
+            vals = np.log(1 + vals)
         base_date = datetime(year, month, 1)
         for j in range(vals.shape[1]):
             data.append(torch.from_numpy(vals[:, j, :, :].copy()).float())

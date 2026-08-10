@@ -25,10 +25,11 @@ class SkipDataLoader:
 @saveable
 class PatchDataset(Dataset):
     def __init__(self, input_variables, target_variables, target_scale, modes,
-                 era_scales=[], inm_scales=[], mask=None, num_workers=4, fix_seed=None):
+                 era_scales=[], inm_scales=[], mask=None, num_workers=4, fix_seed=None, with_climate=[]):
         self.era_time_width = max([s['tSize'] * s['tStep'] for s in era_scales], default=0)
         self.inm_time_width = max([s['tSize'] * s['tStep'] for s in inm_scales], default=0)
         self.modes = {}
+        self.with_climate = with_climate
         for mode in modes:
             x = modes[mode].copy()
             x.setdefault("x_min", 0)
@@ -177,6 +178,16 @@ class PatchDataset(Dataset):
         else:
             return datetime(1970, 1, 1) + timedelta(days=int(t1 - s['tSize']*s['tStep'])), None
 
+    def get_variable_props(self, variable):
+        if variable.endswith('_clim'):
+            return variable[:-5], False, True
+        prefix = ''
+        if variable.startswith('inm_'):
+            prefix = 'inm_'
+        if variable[len(prefix):] in self.with_climate:
+            return variable, True, True
+        return variable, True, False
+
     def get_era_request(self, idx, variable, s, is_target=False):
         key = f'{variable}_{s['id']}' if not is_target else variable
         x0, y0, _ = self.xyt[idx]
@@ -184,7 +195,7 @@ class PatchDataset(Dataset):
 
         if variable in ['year', 'year_norm', 'day', 'cos_day', 'sin_day']:
             dates = [date + timedelta(days=int(i*s['tStep'])) for i in range(s['tSize'])]
-            return self.get_time_variable(dates, variable), key, is_target
+            return self.get_time_variable(dates, variable), key, is_target, False, False
 
         x = (x0 - s['xSize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixX' not in s else s['fixX']
         y = (y0 - s['ySize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixY' not in s else s['fixY']
@@ -195,11 +206,12 @@ class PatchDataset(Dataset):
         if variable in ['lat', 'lon', 'cos_lat', 'cos_lon', 'sin_lon']:
             lat = 0.25*torch.arange(y, y + s['ySize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
             lon = 0.25*torch.arange(x, x + s['xSize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
-            return self.get_spatial_variable(lat, lon, variable), key, is_target
+            return self.get_spatial_variable(lat, lon, variable), key, is_target, False, False
 
         date = date.strftime('%Y%m%d')
+        variable, var, clim = self.get_variable_props(variable)
         req = patcher.Request(variable, x, y, date, s['xSize'], s['ySize'], s['tSize'], s['xyStep'], s['tStep'])
-        return req, key, is_target
+        return req, key, is_target, var, clim
 
     def get_inm_request(self, idx, variable, s):
         is_target = 'id' not in s
@@ -209,11 +221,11 @@ class PatchDataset(Dataset):
 
         if variable[4:] in ['year', 'year_norm', 'day', 'cos_day', 'sin_day']:
             dates = [date + timedelta(days=int(i*s['tStep'])) for i in range(s['tSize'])]
-            return self.get_time_variable(dates, variable[4:]), key, is_target
+            return self.get_time_variable(dates, variable[4:]), key, is_target, False, False
 
         if variable[4:] == 'lead_time':
             days = (date - origin_date).days
-            return torch.tensor([days + i*s['tStep'] for i in range(s['tSize'])], dtype=torch.float32), key, is_target
+            return torch.tensor([days + i*s['tStep'] for i in range(s['tSize'])], dtype=torch.float32), key, is_target, False, False
 
         x = (x0 // 4 - s['xSize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixX' not in s else s['fixX']
         y = (y0 // 4 - s['ySize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixY' not in s else s['fixY']
@@ -221,10 +233,11 @@ class PatchDataset(Dataset):
         if variable[4:] in ['lat', 'lon', 'cos_lat', 'cos_lon', 'sin_lon']:
             lat = torch.arange(y, y + s['ySize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
             lon = torch.arange(x, x + s['xSize']*s['xyStep'], s['xyStep'], dtype=torch.float32)
-            return self.get_spatial_variable(lat, lon, variable[4:]), key, is_target
+            return self.get_spatial_variable(lat, lon, variable[4:]), key, is_target, False, False
 
+        variable, var, clim = self.get_variable_props(variable)
         req = patcher.Request(variable, x, y, date.strftime('%Y%m%d'), s['xSize'], s['ySize'], s['tSize'], s['xyStep'], s['tStep'], origin_date.month)
-        return req, key, is_target
+        return req, key, is_target, var, clim
 
     def __getitem__(self, idx):
         requests = []
@@ -241,16 +254,23 @@ class PatchDataset(Dataset):
                     requests += [self.get_inm_request(idx * batch_size + i, variable, self.target_scale)]
                 else:
                     requests += [self.get_era_request(idx * batch_size + i, variable, self.target_scale, is_target=True)]
-        requests, keys, is_target = map(list, zip(*requests))
-        result = patcher.load(self.context, [r for r in requests if isinstance(r, patcher.Request)])
+        requests, keys, is_target, var, clim = map(list, zip(*requests))
+        result = patcher.load(self.context, [req for req, mask in zip(requests, var) if mask])
+        result_clim = patcher.load_climate(self.context, [req for req, mask in zip(requests, clim) if mask])
 
         inputs = defaultdict(list)
         targets = defaultdict(list)
-        j = 0
+        j, k = 0, 0
         for i in range(len(requests)):
-            if isinstance(requests[i], patcher.Request):
+            if var[i] and clim[i]:
+                value = result[j] + result_clim[k]
+                j, k = j + 1, k + 1
+            elif var[i] and not clim[i]:
                 value = result[j]
                 j += 1
+            elif not var[i] and clim[i]:
+                value = result_clim[k]
+                k += 1
             else:
                 value = requests[i]
             if is_target[i]:
