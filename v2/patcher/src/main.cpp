@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
+#include <iomanip>
 
 #ifdef __linux__
 #include <malloc.h>
@@ -42,6 +43,7 @@ std::vector<uint16_t> encode(
         if (!std::isnan(ptr[i])) minValue = std::min(minValue, ptr[i]);
     }
     if (minValue == std::numeric_limits<float>::max()) minValue = NAN;
+    else minValue = std::floor(minValue / precision) * precision;
 
     std::memcpy(&quantized[0], &minValue, sizeof(float));
     for (size_t i = 0; i < E * T * H * W; ++i) {
@@ -148,6 +150,25 @@ torch::Tensor decode(
     return decode(decompressed, precision, E, T, H, W);
 }
 
+torch::Tensor round_patch(torch::Tensor& tensor, float precision) {
+    float* ptr = tensor.data_ptr<float>();
+    float minValue = std::numeric_limits<float>::max();
+    size_t N = tensor.numel();
+    for (size_t i = 0; i < N; ++i) {
+        if (!std::isnan(ptr[i])) minValue = std::min(minValue, ptr[i]);
+    }
+    if (minValue == std::numeric_limits<float>::max()) return tensor;
+    else minValue = std::floor(minValue / precision) * precision;
+
+    for (size_t i = 0; i < N; ++i) {
+        if (!std::isnan(ptr[i])) {
+            float val = (ptr[i] - minValue) / precision;
+            ptr[i] = static_cast<uint16_t>(std::clamp(val + 0.5f, 0.0f, 65535.0f)) * precision + minValue;
+        }
+    }
+    return tensor;
+}
+
 namespace DateUtils {
     constexpr std::array<int, 13> month_offsets = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365};
     constexpr std::array<int, 13> month_offsets_leap = {0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366};
@@ -221,6 +242,8 @@ void train_dict(
     size_t mapE = sizes[0];
     size_t mapH = sizes[2];
     size_t mapW = sizes[3];
+    context.set_config_param(element + "@min_value", std::numeric_limits<float>::max());
+    context.set_config_param(element + "@max_value", std::numeric_limits<float>::lowest());
     context.set_config_param(element + "@map_size_e", mapE);
     context.set_config_param(element + "@map_size_h", mapH);
     context.set_config_param(element + "@map_size_w", mapW);
@@ -282,6 +305,8 @@ void save(
     size_t patchT = context.get_config_param("patch_size_t");
     size_t patchH = context.get_config_param("patch_size_h");
     size_t patchW = context.get_config_param("patch_size_w");
+    float globalMin = context.get_config_param(element + "@min_value");
+    float globalMax = context.get_config_param(element + "@max_value");
     int compressionLevel = (int)context.get_config_param("compression_level");
     bool timeInvariant = context.get_config_param(element + "@time_invariant") > 0;
     if (timeInvariant) patchT = 1;
@@ -306,7 +331,13 @@ void save(
             mapE = static_cast<size_t>(data[i].size(0));
             context.set_config_list(element + "@map_size_e", mapEVec);
         }
+        auto valid = data[i].masked_select(~torch::isnan(data[i]));
+        if (valid.numel() == 0) continue;
+        globalMin = std::min(globalMin, valid.min().item<float>());
+        globalMax = std::max(globalMax, valid.max().item<float>());
     }
+    context.set_config_param(element + "@min_value", globalMin);
+    context.set_config_param(element + "@max_value", globalMax);
 
     std::vector<uint8_t> dictRaw = context.get_dict(element);
     ZSTD_CDict* cdict = ZSTD_createCDict(dictRaw.data(), dictRaw.size(), compressionLevel);
@@ -447,7 +478,7 @@ void fill_missing_y(torch::Tensor& tensor, int y0, int ySize, int xyStep, size_t
     }
 }
 
-size_t findMapE(const std::vector<float>& mapEVec, int t0) {
+size_t find_map_e(const std::vector<float>& mapEVec, int t0) {
     size_t mapE = 1;
     for (size_t i = 0; i < mapEVec.size(); i += 2) {
         if (mapEVec[i] <= t0) mapE = static_cast<size_t>(mapEVec[i+1]);
@@ -475,7 +506,7 @@ torch::Tensor ThreadPoolLoader::process(const Request& req) {
 
     if (mapE != 1) {
         auto mapEVec = context->get_config_list(req.element + "@map_size_e");
-        mapE = findMapE(mapEVec, t0);
+        mapE = find_map_e(mapEVec, t0);
     }
 
     torch::Tensor result = torch::full({static_cast<long>(mapE), req.tSize, req.ySize, req.xSize}, NAN);
@@ -541,6 +572,9 @@ torch::Tensor ThreadPoolLoader::process(const Request& req) {
 
 std::vector<torch::Tensor> load(Context& context, const std::vector<Request>& requests) {
     std::shared_ptr<ThreadPoolLoader> threadPool = context.get_thread_pool();
+    for (const auto& req : requests) {
+        if (!context.has_config_param(req.element + "@precision")) context.load_index(req.element);
+    }
     std::vector<std::future<torch::Tensor>> futures;
     for (const auto& req : requests) futures.push_back(threadPool->enqueue(req));
     std::vector<torch::Tensor> results;
@@ -602,8 +636,16 @@ torch::Tensor process_climate(Context& context, const Request& req) {
 
 std::vector<torch::Tensor> load_climate(Context& context, const std::vector<Request>& requests) {
     std::vector<torch::Tensor> results;
+    for (const auto& req : requests) {
+        if (!context.has_config_param(req.element + "@precision")) context.load_index(req.element);
+    }
     for (const Request& req : requests) results.push_back(process_climate(context, req));
     return results;
+}
+
+void print_progress(const std::string& msg, int progress, int total) {
+    int width = std::to_string(total).length();
+    std::cout << "\r" << msg << ": " << std::right << std::setw(width) << progress << "/" << total << std::flush;
 }
 
 void aggregate(Context& context, const std::string& element, const std::string& climateStartStr, const std::string& climateEndStr) {
@@ -616,12 +658,15 @@ void aggregate(Context& context, const std::string& element, const std::string& 
 
     ZSTD_DCtx* dctx = ZSTD_createDCtx();
     if (!dctx) throw std::runtime_error("Failed to create decompression context");
+    context.load_index(element);
     ZSTD_DDict* ddict = context.get_ddict(element);
     auto index = context.get_index(element);
     float precision = context.get_config_param(element + "@precision");
     size_t mapE = context.get_config_param(element + "@map_size_e");
     size_t mapH = context.get_config_param(element + "@map_size_h");
     size_t mapW = context.get_config_param(element + "@map_size_w");
+    float globalMin = context.get_config_param(element + "@min_value");
+    float globalMax = context.get_config_param(element + "@max_value");
     size_t patchT = context.get_config_param("patch_size_t");
     size_t patchH = context.get_config_param("patch_size_h");
     size_t patchW = context.get_config_param("patch_size_w");
@@ -654,6 +699,8 @@ void aggregate(Context& context, const std::string& element, const std::string& 
 
     uint64_t totalBytes = 0;
     std::unordered_map<PatchKey, uint64_t> newIndex;
+    int spatialProgress = 0;
+    print_progress("Spatial", 0, spatialGroups.size());
     for (const auto& [spatialKey, times] : spatialGroups) {
         auto [x0, y0, tag] = spatialKey;
         std::vector<uint16_t> sortedTimes(times.begin(), times.end());
@@ -663,7 +710,7 @@ void aggregate(Context& context, const std::string& element, const std::string& 
         std::unordered_map<uint16_t, int> counter;
         for (uint16_t t : sortedTimes) {
             if (t < climateStart || t > climateEnd) continue;
-            mapE = findMapE(mapEVec, t + patchT - 1);
+            mapE = find_map_e(mapEVec, t + patchT - 1);
             PatchKey key = {x0, y0, t, 1, 1, tag};
             auto it = index->find(key);
             if (it == index->end()) continue;
@@ -687,6 +734,7 @@ void aggregate(Context& context, const std::string& element, const std::string& 
                 climate[idx] = tensor / counter[idx];
                 PatchKey key = {x0, y0, idx, 1, 0, tag};
                 encode(out, climate[idx], precision, key, cctx, cdict, newIndex, totalBytes);
+                climate[idx] = round_patch(climate[idx], precision);
             }
         }
 
@@ -699,12 +747,12 @@ void aggregate(Context& context, const std::string& element, const std::string& 
         };
 
         std::unordered_map<int, BlockInfo> blocks;
-        mapE = findMapE(mapEVec, sortedTimes[0] + patchT - 1);
+        mapE = find_map_e(mapEVec, sortedTimes[0] + patchT - 1);
         for (size_t i = 0; i < sortedTimes.size(); ++i) {
             PatchKey key = {x0, y0, sortedTimes[i], 1, 1, tag};
             auto it = index->find(key);
             if (it == index->end()) continue;
-            size_t newMapE = findMapE(mapEVec, sortedTimes[i] + patchT - 1);
+            size_t newMapE = find_map_e(mapEVec, sortedTimes[i] + patchT - 1);
             if (mapE != newMapE) {
                 blocks.clear();
                 mapE = newMapE;
@@ -764,12 +812,20 @@ void aggregate(Context& context, const std::string& element, const std::string& 
                     stage++;
                 }
             }
+            for (auto& [stg, info] : blocks) {
+                int sumSize = 1 << (2 * stg);
+                PatchKey key = {x0, y0, static_cast<uint16_t>(info.blockStart), 1, static_cast<uint16_t>(sumSize), tag};
+                encode(out, info.block, precision, key, cctx, cdict, newIndex, totalBytes);
+            }
         }
         for (auto [stage, info] : blocks) {
             PatchKey key = {x0, y0, static_cast<uint16_t>(info.blockStart), 1, static_cast<uint16_t>(1 << (2 * stage)), tag};
             encode(out, info.block, precision, key, cctx, cdict, newIndex, totalBytes);
         }
+        spatialProgress++;
+        print_progress("Spatial", spatialProgress, spatialGroups.size());
     }
+    std::cout << std::endl;
     context.save_index(element, newIndex);
     in.close();
     out.close();
@@ -784,10 +840,11 @@ void aggregate(Context& context, const std::string& element, const std::string& 
     std::map<std::tuple<uint16_t, uint16_t, uint16_t>, std::vector<PatchKey>> temporalGroups;
     for (const auto& [key, offset] : newIndex) temporalGroups[{key.t0, key.tStep, key.tag}].push_back(key);
 
-    int temporalKeyNum = 0;
+    int temporalProgress = 0;
+    print_progress("Temporal", temporalProgress, temporalGroups.size());
     for (const auto& [temporalKey, patchKeys] : temporalGroups) {
         auto [t0, tStep, tag] = temporalKey;
-        mapE = tStep == 0 ? 1 : findMapE(mapEVec, t0 + tStep * patchT - 1);
+        mapE = tStep == 0 ? 1 : find_map_e(mapEVec, t0 + tStep * patchT - 1);
         auto map = torch::full({static_cast<long>(mapE), static_cast<long>(tStep == 0 ? 1 : patchT), static_cast<long>(mapH), static_cast<long>(mapW*2)}, NAN);
         if (tStep == 0) map = torch::full({1, 1, static_cast<long>(mapH), static_cast<long>(mapW*2)}, NAN);
         for (const PatchKey& key : patchKeys) {
@@ -823,11 +880,13 @@ void aggregate(Context& context, const std::string& element, const std::string& 
                 }
             }
         }
+        temporalProgress++;
+        print_progress("Temporal", temporalProgress, temporalGroups.size());
 #ifdef __linux__
-        temporalKeyNum++;
-        if (temporalKeyNum % 10 == 0) malloc_trim(0);
+        if (temporalProgress % 10 == 0) malloc_trim(0);
 #endif
     }
+    std::cout << std::endl;
 
     context.save_index(element, newIndex);
     ZSTD_freeCCtx(cctx);

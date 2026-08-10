@@ -5,14 +5,7 @@ import sys
 import requests
 from pathlib import Path
 from tqdm import tqdm
-
-config = "Zn-58-Mk067V7g"
-
-ELEMENTS = {
-    "lsm": ("0NmLsBasnPnv1g", "e-kAMIT3O5cDNA"),
-    "inm_t2m": ("XV2DzWxyt3Jn0g", "aJqvONOaQERVBw"),
-    "t2m": ("hvV4Y9aRuZYx-w", "KK-vrRnzX6n3LQ")
-}
+from content import CONFIG, ELEMENTS
 
 def download_file(file_id, output):
     resp = requests.get(f"https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=https://disk.yandex.ru/d/{file_id}")
@@ -36,17 +29,22 @@ def check_damaged():
     damaged = [e for e in ELEMENTS.keys() if e not in complete and e not in missing]
     return complete, damaged, missing
 
+def format_elements_list(elements):
+    return '\n'.join(f"  - {element}: {ELEMENTS[element]['name']} ({ELEMENTS[element]['units']})" for element in elements)
+
 def download_elements():
     if not os.path.exists("config.bin"):
-        download_file(config, "config.bin")
+        download_file(CONFIG, "config.bin")
 
     complete, damaged, missing = check_damaged()
     if complete:
-        print(f"Complete: {complete}")
+        print(f"Complete:\n{format_elements_list(complete)}")
+    if not damaged and not missing:
+        return
     if damaged:
-        print(f"Damaged: {damaged}")
+        print(f"Damaged:\n{format_elements_list(damaged)}")
     if missing:
-        print(f"Missing: {missing}")
+        print(f"Missing:\n{format_elements_list(missing)}")
 
     choice = input("\nEnter elements to download (space-separated, empty for all missing): ").strip()
     if choice:
@@ -59,7 +57,7 @@ def download_elements():
     for element in to_download:
         bin_path = f"{element}.bin"
         idx_path = f"{element}.idx"
-        link_bin, link_idx = ELEMENTS[element]
+        link_bin, link_idx = ELEMENTS[element]['bin'], ELEMENTS[element]['idx']
 
         download_file(link_bin, bin_path)
         download_file(link_idx, idx_path)
