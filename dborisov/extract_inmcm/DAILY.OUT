@@ -1,0 +1,71 @@
+1  'U-wind 850mb., m/s'                     'DU850.STD'   0 'f'  0.0   1.0
+2  'V-wind 850mb., m/s'                     'DV850.STD'   0 'f'  0.0   1.0
+3  'U-wind 200mb., m/s'                     'DU200.STD'   0 'f'  0.0   1.0
+4  'V-wind 200mb., m/s'                     'DV200.STD'   0 'f'  0.0   1.0
+5  'U-wind 50mb., m/s'                      'DU50.STD'    0 'f'  0.0   1.0
+6  'V-wind 50mb., m/s'                      'DV50.STD'    0 'f'  0.0   1.0
+7  'Outgoing longwave radiation, W/m**2'    'DOLR.STD'    1 'f'  0.0   10.0
+8  'Precipitation, mm/day'                  'DPREC.STD'   1 'f'  0.0   100.0
+9  'Sea-level pressure, mb.'                'DPS.STD'     1 'f'  1000.0  100.0
+10 'Surface pressure, mb.'                  'DPSURF.STD'  1 'f'  0.0   1.0
+11 'Geopotential 500mb.'                    'DH500.STD'   0 'f'  0.0   1.0
+12 'Temperature 850mb., K'                  'DT850.STD'   0 'f'  0.0   1.0
+13 'Specific humidity 850mb., kg/kg'        'DQ850.STD'   0 'f'  0.0   1.0
+14 'Specific humidity 500mb., kg/kg'        'DQ500.STD'   0 'f'  0.0   1.0
+15 'W-wind 500mb., Pa/s'                    'DW500.STD'   0 'f'  0.0   1.0
+16 'U-wind 10m., m/s'                       'DU10.STD'    1 'f'  0.0   100.0
+17 'V-wind 10m., m/s'                       'DV10.STD'    1 'f'  0.0   100.0
+18 'Temperature 2m., K'                     'DT2.STD'     1 'f'  273.15  100.0
+19 'Specific humidity 2m., kg/kg'           'DQ2.STD'     1 'f'  0.0   500000.0
+20 'Cloud cover, percent'                   'DCLD.STD'    1 'f'  0.0   1.0
+21 'X wind surface stress, N/m**2'          'DTX.STD'     1 'f'  0.0   1.0
+22 'Y wind surface stress, N/m**2'          'DTY.STD'     1 'f'  0.0   1.0
+23 'Precipitable water, mm.'                'DPW.STD'     1 'f'  0.0   1.0
+24 'Sensible heat flux, W/m**2'             'DHSN.STD'    1 'f'  0.0   10.0
+25 'Latent heat flux, W/m**2'               'DHLT.STD'    1 'f'  0.0   10.0
+26 'Total runoff, mm/day'                   'DRUNOFF.STD' 1 'f'  0.0   1.0
+27 '10 sm. soil water, mm.'                 'DWS.STD'     1 'f'  0.0   1.0
+28 '100 sm. soil water, mm.'                'DWW.STD'     1 'f'  0.0   1.0
+29 'Snow depth, mm.'                        'DSS.STD'     1 'f'  0.0   1.0
+30 'Surface incident SW radiation, W/m**2'  'DSDWSW.STD'  1 'f'  0.0   10.0
+31 'Surface reflected SW radiation, W/m**2' 'DSUPSW.STD'  1 'f'  0.0   10.0
+32 'Surface DW LW radiation, W/m**2'        'DSDWLW.STD'  1 'f'  0.0   10.0
+33 'Surface upwelling LW radiation, W/m**2' 'DSUPLW.STD'  1 'f'  0.0   10.0
+34 'TOA incident SW radiation, W/m**2'      'DSOMOCD.STD' 1 'f'  0.0   1.0
+35 'TOA reflected SW radiation, W/m**2'     'DTUPSW.STD'  1 'f'  0.0   1.0
+36 'Surface temperature, K'                 'DTS.STD'     1 'f'  0.0   1.0
+37 'Daily maximum precipitation, mm/hr'     'DPRMAX.STD'  1 'f'  0.0   1.0
+38 'Potential vorticity 450K., 1/(Pa*s)'    'DPV450.STD'  0 'f'  0.0   1.0
+39 'Planetary boundary layer height, m'     'DPBL.STD'    1 'f'  0.0   1.0
+40 'Temperature 500mb., K'                  'DT500.STD'   0 'f'  0.0   1.0
+41 'Temperature 50mb., K'                   'DT50.STD'    0 'f'  0.0   1.0
+42 'Daily maximal 2m temperature, K'        'DT2MAX.STD'  1 'f'  273.15 100.0
+43 'Daily minimal 2m temperature, K'        'DT2MIN.STD'  1 'f'  273.15 100.0
+44 'Surface incident SW rad clear sky'      'DSDWSWC.STD' 1 'f'  0.0   1.0
+45 'Surface reflected SWR clear sky'        'DSUPSWC.STD' 1 'f'  0.0   1.0
+46 'Surface incident LW rad clear sky'      'DSDWLWC.STD' 1 'f'  0.0   1.0
+47 'TOA reflected SWR clear sky'            'DTUPSWC.STD' 1 'f'  0.0   1.0
+48 'TOA outgoing LWR clear sky'             'DOLRC.STD'   1 'f'  0.0   1.0
+49 'Total cloud water, kg/m2'               'DCWAT.STD'   1 'f'  0.0   1.0
+50 'Total cloud ice, kg/m2'                 'DCICE.STD'   1 'f'  0.0   1.0
+51 'Temperature at 700 mb., K'              'DT700.STD'   0 'f'  0.0   1.0
+52 'Pressure of convection bottom, hPa'     'DPBOT.STD'   1 'f'  0.0   1.0
+53 'Pressure of convection top, hPa'        'DPTOP.STD'   1 'f'  0.0   1.0
+54 'Covection indicator, 1'                 'DCONV.STD'   1 'f'  0.0   1.0
+55 'Deep covection indicator, 1'            'DDCONV.STD'  1 'f'  0.0   1.0
+56 'Convective precipitation, mm/day'       'DPRC.STD'    1 'f'  0.0   1.0
+57 'Surface wind speed, m/s'                'DUV10.STD'   1 'f'  0.0   100.0
+58 'U-comp of daily maximum wind, m/s'      'DU10MAX.STD' 1 'f'  0.0   1.0
+59 'V-comp of daily maximum wind, m/s'      'DV10MAX.STD' 1 'f'  0.0   1.0
+60 'Daily minimum rel. hum., 1'             'DRQ2MIN.STD' 1 'f'  0.0   1.0
+61 'Daily maximum rel. hum., 1'             'DRQ2MAX.STD' 1 'f'  0.0   1.0
+62 'Daily minimum dew point, K'             'DDEWMIN.STD' 1 'f'  0.0   1.0
+63 'Daily maximum dew point, K'             'DDEWMAX.STD' 1 'f'  0.0   1.0
+64 'Snow area, 1'                           'DSFR.STD'    1 'f'  0.0   1.0
+65 'Snowfall rate, mm/day'                  'DSNOW.STD'   1 'f'  0.0   1.0
+66 'Relative humidity at 2m.'               'DRQ2.STD'    1 'f'  0.0   1.0
+67 'Snow water, kg m-2      '               'DSNW.STD'    0 'f'  0.0   1.0
+68 'Refrozen snow water, kg m-2'            'DRFROZ.STD'  0 'f'  0.0   1.0
+69 'Snow density, kg m-3'                   'DRHOSN.STD'  0 'f'  0.0   1.0
+70 'Full (inc. water) snow density kg m-3'  'DRHOFULL.STD' 0 'f'  0.0   1.0
+71 'Real snow, kg m-2'                      'DSR.STD'    0 'f'  0.0   1.0

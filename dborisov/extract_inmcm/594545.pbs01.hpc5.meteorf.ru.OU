@@ -1,0 +1,14 @@
+    Enabling python environment ak.py3.10.4.20251031
++ cd /RHM-Lustre3.2/users/muza-art/dborisov/copy_inmcm
++ module use /RHM-Lustre3.2/users/cosmo/akirsanov/modules
+++ /opt/cray/pe/modules/3.2.11.4/bin/modulecmd bash use /RHM-Lustre3.2/users/cosmo/akirsanov/modules
++ eval
++ module load ak.py3.10.4.20251031
+++ /opt/cray/pe/modules/3.2.11.4/bin/modulecmd bash load ak.py3.10.4.20251031
+    Enabling python environment ak.py3.10.4.20251031
++ eval
++ module load alps
+++ /opt/cray/pe/modules/3.2.11.4/bin/modulecmd bash load alps
++ eval
++ aprun -B -cc numa_node python3 extract.py
+Application 51182880 resources: utime ~1865s, stime ~200s, Rss ~1210132, inblocks ~208775228, outblocks ~1920

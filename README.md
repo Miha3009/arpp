@@ -86,6 +86,10 @@ Each script writes to a subfolder under `data/raw/`. All scripts skip files that
 
 **Output:** `data/raw/ghcn/` — `{year}.csv.gz` files + `ghcnd-stations.csv`.
 
+<div style="background-color: #f04506; padding: 10px; border-radius: 5px;box-shadow: 3px 3px 5px #888888">
+<span style="color: black;">Не используется?<span>
+</div>
+
 ---
 
 ### download_time_invariant.py
@@ -130,10 +134,14 @@ Same split-and-flip for sea ice cover (`siconc`). No unit conversion — values 
 
 **Output:** `data/prepare/era5_ice/{YYYYMMDD}.nc` — variable `ice` [fraction].
 
-#### prepare_globsnow_swe.py
+#### prepare_globsnow_swe.py обработанный спутник
 Regrids GlobSnow from its native irregular/polar grid to 0.25° lat/lon using **Delaunay triangulation + barycentric interpolation**. Regrid weights computed once and cached at `data/tmp/globsnow_weights.npz`. Applies ERA5 land/sea mask. Handles archive (pre-2018) and NRT (v1.0/v2.0) format differences.
 
 **Output:** `data/prepare/globsnow/{YYYYMMDD}.nc` — variable `swe`.
+
+<div style="background-color: #f04506; padding: 10px; border-radius: 5px;box-shadow: 3px 3px 5px #888888">
+<span style="color: black;">Не используется?<span>
+</div>
 
 #### prepare_noaa_ice.py
 Regrids NOAA CDR from its native **25 km polar stereographic (EPSG:3411)** to lat/lon using Delaunay triangulation. Handles sensor transitions (F08→F11→F13→F17→am2). Fills small NaN gaps (≤15 cells) via nearest-neighbour distance transform. Applies ERA5 ocean mask. Uses a producer–consumer pattern: worker pool processes files, two saver processes write outputs.
@@ -144,6 +152,10 @@ Regrids NOAA CDR from its native **25 km polar stereographic (EPSG:3411)** to la
 Averages over SEAS5 ensemble members, converts m→mm, regrids to 0.25° by linear interpolation, aggregates daily values to **weekly means** (up to 3-month lead time). Assigns lead time in months relative to the forecast initialization date.
 
 **Output:** `data/prepare/swe_seas/all.nc` — single file indexed by `week`.
+
+<div style="background-color: #f04506; padding: 10px; border-radius: 5px;box-shadow: 3px 3px 5px #888888">
+<span style="color: black;">Не используется?<span>
+</div>
 
 #### prepare_time_invariant.py
 Loads 9 time-invariant ERA5 fields, flips lat axis, crops to 40–90°N, and merges them into a single dataset.
@@ -197,7 +209,7 @@ Aggregates daily ERA5 files to period means (weekly for SWE, monthly for ice), t
 Central assembly script. For each variable and year:
 1. **Bias correction** — computes mean systematic offset between INM-CM and ERA5 anomalies over training years → `bias/{period}.nc`
 2. **Interpolation** — regrids INM-CM to the ERA5 reference grid
-3. **Bias removal** — subtracts the stored bias from INM-CM anomalies
+3. **Bias removal** — subtracts the stored bias from INM-CM anomalies.<span style="color: red;">*То есть в модель подаются уже скорректированные biasом аномалии? Уточнить подход*?<span>
 4. **Clipping** — clips values: ice to [0, 1], SWE to [0, ∞]
 5. **Merging** — joins INM-CM predictors, the target variable anomaly, and ERA5 ground truth into one dataset with a `lead_time` dimension
 6. **Climate normals** — writes combined per-period climatology files
@@ -206,6 +218,15 @@ Central assembly script. For each variable and year:
 - `data/train/{variable}/anom/{YYYY}{PP}.nc` — all predictors + ERA5 target
 - `data/train/{variable}/clim/{PP}.nc` — combined climatology
 - `data/train/{variable}/bias/{PP}.nc` — bias correction map
+
+<div style="background-color: #f04506; padding: 10px; border-radius: 5px;box-shadow: 3px 3px 5px #888888">
+<span style="color: black;">Почему в train/anom разные сетки (интерполировано только swe)? Интерполяция в ClimateDataset.unify()?<span></div>
+
+<div style="background-color: #f04506; padding: 10px; border-radius: 5px;box-shadow: 3px 3px 5px #888888">
+<span style="color: black;">В train/anom только INMCM и ERA5?<span></div>
+
+<div style="background-color: #f04506; padding: 10px; border-radius: 5px;box-shadow: 3px 3px 5px #888888">
+<span style="color: black;">В train/climate только INMCM? Не вижу swe_era5 <span></div>
 
 #### prepare_std.py
 Computes per-variable, per-grid-cell **RMS** normalization statistics over 1991–2020. Categorical variables (`slt`, `tvh`, `tvl`) are one-hot encoded; geopotential is log-transformed; orography is min-max scaled.
