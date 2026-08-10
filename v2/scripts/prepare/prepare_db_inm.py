@@ -1,0 +1,42 @@
+import torch
+import patcher
+import xarray as xr
+import os
+import numpy as np
+from datetime import datetime, timedelta
+
+context = patcher.Context('../../db', 1)
+precision = {'inm_t2m': 0.05}
+
+def process_element(element, element_inm):
+    if os.path.exists(f'../../db/{element}.bin'):
+        return
+
+    directory = f'../../../{element_inm}'
+    files = sorted(list(os.listdir(directory)))
+    files = [f for f in files if f.endswith('nc')]
+    k = 0
+    for i, file in enumerate(files):
+        data, dates = [], []
+        year = int(file[5:9])
+        month = int(file[9:11])
+        print(f'Read {element}/{file}')
+        ds = xr.open_dataset(f'{directory}/{file}')
+        vals = ds[element_inm].values
+        vals = np.roll(vals, 180, axis=3)
+        base_date = datetime(year, month, 1)
+        for j in range(vals.shape[1]):
+            data.append(torch.from_numpy(vals[:, j, :, :].copy()).float())
+            date = base_date + timedelta(days=int(ds.day.values[j]))
+            dates.append(date.strftime('%Y%m%d'))
+        if k == 0:
+            k = 1
+            print(f'Train dict {element}')
+            patcher.train_dict(context, data, element, precision[element])
+        print(f'Save {element}')
+        patcher.save(context, data, dates, element, tag=month)
+    print(f'Aggregate {element}')
+    patcher.aggregate(context, element, "19910101", "20210430")
+
+process_element('inm_t2m', 'T2')
+
