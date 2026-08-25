@@ -1,3 +1,4 @@
+# data & model binaries
 *.bin
 *.idx
 *.pt
