@@ -11,3 +11,4 @@ scripts/anaconda_projects
 *.idx
 data/tmp/*
 !data/tmp/.lock
+.venv
