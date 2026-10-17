@@ -27,6 +27,7 @@ def process_element(element, element_inm):
         print(f'Read {element}/{file}')
         ds = xr.open_dataset(f'{directory}/{file}')
         vals = ds[element_inm].values
+        vals = np.roll(vals, 180, axis=3)
         if element in log_scale:
             vals = np.log(1 + vals)
         base_date = datetime(year, month, 1)

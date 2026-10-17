@@ -9,6 +9,8 @@ import json
 from collections import defaultdict
 from datetime import datetime, timedelta
 import xarray as xr
+import os
+from utils import to_device
 
 from saver import load_from_config
 
@@ -78,6 +80,8 @@ class Experiment:
             'current_loss': self.current_loss,
             'history': self.history
         }
+        if hasattr(self.metric, 'state_dict'):
+            checkpoint['metric_state'] = self.metric.state_dict()
         torch.save(checkpoint, self.checkpoints_dir / f'{name}.pt')
         pd.DataFrame(self.history).to_csv(self.exp_dir / 'loss_history.csv', index=False)
 
@@ -97,6 +101,8 @@ class Experiment:
         self.current_batch = checkpoint['current_batch']
         self.current_loss = checkpoint['current_loss']
         self.history = checkpoint['history']
+        if 'metric_state' in checkpoint and hasattr(self.metric, 'load_state_dict'):
+            self.metric.load_state_dict(checkpoint['metric_state'])
 
     def run(self, epochs, save_every_n_epochs=5):
         while self.current_epoch < epochs:
@@ -113,7 +119,7 @@ class Experiment:
             self.current_mode = self.modes[(self.modes.index(self.current_mode) + 1) % len(self.modes)]
             self.current_batch = 0
             self.current_loss = 0
-            if self.current_mode == self.modes[0] and self.current_epoch % save_every_n_epochs == 0 and self.current_epoch < epochs:
+            if self.current_mode == self.modes[0] and self.current_epoch % save_every_n_epochs == 0:
                 self.save_checkpoint(f'e{self.current_epoch:03d}')
         self.save_checkpoint(f'last')
 
@@ -130,8 +136,8 @@ class Experiment:
                 exit(0)
 
             self.optimizer.zero_grad()
-            inputs = {key: value.to(self.device) for key, value in x.items()}
-            targets = {key: value.to(self.device) for key, value in y.items()}
+            inputs = {key: to_device(value, self.device) for key, value in x.items()}
+            targets = {key: to_device(value, self.device) for key, value in y.items()}
             outputs = self.model(inputs)
             loss = self.metric(outputs, targets)
             self.current_loss += loss.item()
@@ -155,8 +161,8 @@ class Experiment:
                     self.save_checkpoint('last')
                     exit(0)
 
-                inputs = {key: value.to(self.device) for key, value in x.items()}
-                targets = {key: value.to(self.device) for key, value in y.items()}
+                inputs = {key: to_device(value, self.device) for key, value in x.items()}
+                targets = {key: to_device(value, self.device) for key, value in y.items()}
                 outputs = self.model(inputs)
                 loss = self.metric(outputs, targets)
 
@@ -164,7 +170,7 @@ class Experiment:
                 self.current_batch += 1
                 pbar.set_postfix({"loss": f"{self.current_loss / self.current_batch:.4f}"})
         self.history[-1][self.current_mode] = self.current_loss / self.current_batch
-
+    
     def plot_history(self):
         history = pd.DataFrame(self.history)
         epochs = [item['epoch'] for item in self.history]
@@ -221,7 +227,7 @@ class Experiment:
                 plt.scatter(x, values, c=color, s=20)
         
             plt.xlabel('Epoch')
-            x = x.iloc[-20:]
+            x = x.iloc[-200:]
             plt.xticks(x.astype(int))
             plt.xlim([min(x)-0.5, max(x)+0.5])
             plt.ylabel(metric)
@@ -246,78 +252,92 @@ class Experiment:
         flatten(self.history[-1])
         self.history[-1] = flattened
 
-    def run_full_test(self, mode, target_field):
-        self.dataset.set_full(mode)
+    def run_full_test(self, mode, target_field, overlap=1):
+        output_dir = self.exp_dir / 'result'
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.dataset.set_full(mode, skip=len(os.listdir(output_dir)), overlap=overlap)
         pbar = tqdm(self.dataset.loader, desc=mode, unit="batch")
         B = len(self.dataset.xyt)
         W = self.dataset.target_scale['xSize']
         H = self.dataset.target_scale['ySize']
         T = self.dataset.target_scale['tSize']
-        result = {
-            'output': torch.full((B, T, H, W), float('nan'), dtype=torch.float32),
-            'target': torch.full((B, T, H, W), float('nan'), dtype=torch.float32),
-            'lat': torch.full((B, H), float('nan'), dtype=torch.float32),
-            'lon': torch.full((B, W), float('nan'), dtype=torch.float32),
-            'day': torch.full((B, T), float('nan'), dtype=torch.float32),
-            'year': torch.full((B, T), float('nan'), dtype=torch.float32),
-            'lead_time': torch.full((B, T), float('nan'), dtype=torch.float32),
-        }
-        i = 0
-        with torch.no_grad():
-            for x, y in pbar:
-                inputs = {key: value.to(self.device) for key, value in x.items()}
-                targets = {key: value.to(self.device) for key, value in y.items()}
-                outputs = self.model(inputs)
-                for j in range(outputs.shape[0]):
-                    result['output'][i+j, ...] = outputs[j, ...]
-                    result['target'][i+j, ...] = targets[target_field][j, ...]
-                    for rfield, field in [('target', target_field), ('lat', 'lat'), ('lon', 'lon'), ('day', 'day'),
-                                  ('year', 'year'), ('lead_time', 'inm_lead_time')]:
-                        result[rfield][i+j, ...] = targets[field][j, ...]
-                i += outputs.shape[0]
-        i = 0
-        mode = self.dataset.modes[mode]
-        T2 = mode['lead_time_range'][1] - mode['lead_time_range'][0] + T
-        H2 = mode['y_max'] - mode['y_min']
-        W2 = mode['x_max'] - mode['x_min']
-        output_dir = self.exp_dir / 'result'
-        output_dir.mkdir(parents=True, exist_ok=True)
-        for t, B in tqdm(self.dataset.t.items(), desc='save', unit='file'):
-            current = {
-                'output': torch.full((T2, H2, W2), float('nan'), dtype=torch.float32),
-                'target': torch.full((T2, H2, W2), float('nan'), dtype=torch.float32),
-                'lat': torch.full((H2,), float('nan'), dtype=torch.float32),
-                'lon': torch.full((W2,), float('nan'), dtype=torch.float32),
-                'day': torch.full((T2,), float('nan'), dtype=torch.float32),
-                'year': torch.full((T2,), float('nan'), dtype=torch.float32),
-                'lead_time': torch.full((T2,), float('nan'), dtype=torch.float32),
-            }
-            for j in range(i + B - 1, i - 1, -1):
-                x, y, l = self.dataset.xyl[j]
-                x1, x2 = x - W // 2, x + W // 2
-                y1, y2 = y - H // 2, y + H // 2
-                l1, l2 = l - T, l
-                crop_x, crop_y = max(x2 - W2, 0), max(y2 - H2, 0)
-                for key in ['output', 'target']:
-                    current[key][l1:l2, y1:y2-crop_y, x1:x2-crop_x] = result[key][j, :, :H-crop_y, :W-crop_x]
-                current['lat'][y1:y2-crop_y] = result['lat'][j, :H-crop_y]
-                current['lon'][x1:x2-crop_x] = result['lon'][j, :W-crop_x]
-                for key in ['day', 'year', 'lead_time']:
-                    current[key][l1:l2] = result[key][j, :]
+        
+        mode_data = self.dataset.modes[mode]
+        T2 = mode_data['lead_time_range'][1] - mode_data['lead_time_range'][0] + T
+        H2 = mode_data['y_max'] - mode_data['y_min']
+        W2 = mode_data['x_max'] - mode_data['x_min']
+                
+        current_t = None
+        accum = None
+        
+        def save_accum(t, accum):
             ds = xr.Dataset({
-                'output': (['lead_time', 'lat', 'lon'], current['output'].numpy()),
-                'target': (['lead_time', 'lat', 'lon'], current['target'].numpy()),
-                'day': (['lead_time'], current['day'].numpy()),
-                'year': (['lead_time'], current['year'].numpy()),
+                'output': (['lead_time', 'lat', 'lon'], (accum['output'].numpy() / accum['count'].numpy())),
+                'target': (['lead_time', 'lat', 'lon'], (accum['target'].numpy() / accum['count'].numpy())),
+                'clim': (['lead_time', 'lat', 'lon'], (accum['clim'].numpy() / accum['count'].numpy())),
+                'day': (['lead_time'], accum['day'].numpy()),
+                'year': (['lead_time'], accum['year'].numpy()),
             }, coords={
-                'lat': current['lat'].numpy(),
-                'lon': current['lon'].numpy(),
-                'lead_time': current['lead_time'].numpy(),
+                'lat': accum['lat'].numpy(),
+                'lon': accum['lon'].numpy(),
+                'lead_time': accum['lead_time'].numpy(),
             })
             t_str = (datetime(1970, 1, 1) + timedelta(days=int(t))).strftime('%Y%m')
             ds.to_netcdf(output_dir / f'{t_str}.nc', engine='h5netcdf', encoding={
                 'output': {'zlib': True, 'complevel': 4},
                 'target': {'zlib': True, 'complevel': 4},
+                'clim': {'zlib': True, 'complevel': 4},
             })
-            i += B
 
+        idx = 0
+        with torch.no_grad():
+            for x, y in pbar:
+                inputs = {key: value.to(self.device) for key, value in x.items()}
+                targets = {key: value.to(self.device) for key, value in y.items()}
+                outputs = self.model(inputs)
+                
+                for j in range(outputs.shape[0]):
+                    if self.should_stop:
+                        return
+                    _, _, t = self.dataset.xyt[idx]
+
+                    if t != current_t:
+                        if accum is not None:
+                            save_accum(current_t, accum)
+                            return
+                        current_t = t
+                        accum = {
+                            'output': torch.zeros((T2, H2, W2), dtype=torch.float32),
+                            'count': torch.zeros((T2, H2, W2), dtype=torch.float32),
+                            'target': torch.zeros((T2, H2, W2), dtype=torch.float32),
+                            'clim': torch.zeros((T2, H2, W2), dtype=torch.float32),
+                            'lat': torch.full((H2,), float('nan'), dtype=torch.float32),
+                            'lon': torch.full((W2,), float('nan'), dtype=torch.float32),
+                            'day': torch.full((T2,), float('nan'), dtype=torch.float32),
+                            'year': torch.full((T2,), float('nan'), dtype=torch.float32),
+                            'lead_time': torch.full((T2,), float('nan'), dtype=torch.float32),
+                        }
+                    
+                    x_pos, y_pos, l_pos = self.dataset.xyl[idx]
+                    x1, x2 = x_pos - W // 2, x_pos + W // 2
+                    y1, y2 = y_pos - H // 2, y_pos + H // 2
+                    l_pos -= mode_data['lead_time_range'][0] - 32
+                    l1, l2 = l_pos - T, l_pos
+                    crop_x, crop_y = max(x2 - W2, 0), max(y2 - H2, 0)
+
+                    outputs[j, ...] = torch.where(targets['sd_clim'][j, ...] < 0.01, 0.0, outputs[j, ...])
+
+                    accum['count'][l1:l2, y1:y2-crop_y, x1:x2-crop_x] += 1
+                    accum['output'][l1:l2, y1:y2-crop_y, x1:x2-crop_x] += outputs[j, :, :H-crop_y, :W-crop_x].cpu()
+                    accum['target'][l1:l2, y1:y2-crop_y, x1:x2-crop_x] += targets[target_field][j, :, :H-crop_y, :W-crop_x].cpu()
+                    accum['clim'][l1:l2, y1:y2-crop_y, x1:x2-crop_x] += targets['sd_clim'][j, :, :H-crop_y, :W-crop_x].cpu()
+                    accum['lat'][y1:y2-crop_y] = targets['lat'][j, :H-crop_y].cpu()
+                    accum['lon'][x1:x2-crop_x] = targets['lon'][j, :W-crop_x].cpu()
+                    accum['day'][l1:l2] = targets['day'][j, :].cpu()
+                    accum['year'][l1:l2] = targets['year'][j, :].cpu()
+                    accum['lead_time'][l1:l2] = targets['inm_lead_time'][j, :].cpu()
+                    idx += 1
+
+        if accum is not None:
+            save_accum(current_t, accum)

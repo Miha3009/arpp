@@ -4,15 +4,17 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
-variables = [("t2m", "2m_temperature"),
-             ("tp", "total_precipitation"),
-             ("sd", "snow_depth"),
-             ("sden", "snow_density"),
-             ("t2m_min", "minimum_2m_temperature_since_previous_post_processing"),
-             ("t2m_max", "maximum_2m_temperature_since_previous_post_processing"),
-             ("pt", "precipitation_type"),
-             ("h500", "geopotential#500"),
-             ("t850", "temperature#850")]
+variables = [#("t2m", "2m_temperature"),
+             #("tp", "total_precipitation"),
+             #("sd", "snow_depth"),
+             #("sden", "snow_density"),
+#             ("t2m_min", "minimum_2m_temperature_since_previous_post_processing"),
+#             ("t2m_max", "maximum_2m_temperature_since_previous_post_processing"),
+             #("pt", "precipitation_type"),
+             ("mslp",    "mean_sea_level_pressure"),
+             ]
+#             ("h500", "geopotential#500"),
+#             ("t850", "temperature#850")]
 
 dataset_single = "derived-era5-single-levels-daily-statistics"
 dataset_pressure = "derived-era5-pressure-levels-daily-statistics"
@@ -80,6 +82,6 @@ def download_task(task):
 success_count = 0
 fail_count = 0
 
-with ThreadPoolExecutor(max_workers=5) as executor:
+with ThreadPoolExecutor(max_workers=1) as executor:
     for task in tasks:
         executor.submit(download_task, task)

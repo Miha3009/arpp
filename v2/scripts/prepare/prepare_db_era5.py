@@ -5,17 +5,22 @@ import os
 import numpy as np
 from datetime import datetime, timedelta
 
-directory='/home/miha3009/work/weather/patcher/era5'
+#directory='/home/miha3009/work/weather/patcher/era5'
+directory='../download/era5'
+
 context = patcher.Context('../../db', 1)
-precision = {'t2m': 0.05, 'lsm': 0.01, 'sd': 0.001, 'z': 0.001, 'sdor': 0.001, 'tp': 0.001, 'sden': 0.1, 'pt': 0.25,
-             'snow_cover': 0.01, 'glaicer': 1, 'sst': 0.05}
+precision = {'t2m': 0.05, 'lsm': 0.01, 'sd': 0.1, 'z': 1, 'sdor': 0.1, 'tp': 0.1, 'pt': 0.25,
+             'snow_cover': 0.01, 'glaicer': 1, 'sst': 0.05, 'td2m': 0.05, 'ts': 0.05,
+             'v10': 0.05, 'u10': 0.05, 'olr': 0.1, 'msl': 0.1, 't2m_min': 0.05, 't2m_max': 0.05} 
 aliases = {'sden': 'rsn', 'pt': 'ptype'}
 scale = {
     'sd': 1000, # m to mm
     'z': 1 / 9.8066, # geopotential to m
-    'tp': 24000 # m/hr to mm/day
+    'tp': 24000, # m/hr to mm/day
+    'olr': 1 / -3600, # J/m^2 to W/m^2
+    'msl': 1 / 100, # Pa to hPa
 }
-log_scale = ['sd', 'z', 'sdor', 'tp']
+log_scale = [] #['sd', 'z', 'sdor', 'tp']
 min_level = {'z': -129}
 fill_value = {'sst': 273.15}
 no_climate = ['pt']
@@ -114,7 +119,7 @@ def process_glaicer_mask():
     patcher.save(context, [data], ['19910101'], element)
     patcher.aggregate(context, element, "", "")
 
-for element in ['t2m', 'sd', 'tp', 'sden', 'pt', 'sst']:
+for element in ['t2m', 'sd', 'tp', 'pt', 'sst', 'td2m', 'ts', 'u10', 'v10', 'olr', 'msl', 't2m_min', 't2m_max']:
     process_element(element)
 
 for element, origin_element in [('lsm', 'land_sea_mask'),

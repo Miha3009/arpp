@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from torch.utils.data import Dataset
 from saver import saveable
+from pathlib import Path
 
 class SkipDataLoader:
     def __init__(self, dataset):
@@ -25,11 +26,13 @@ class SkipDataLoader:
 @saveable
 class PatchDataset(Dataset):
     def __init__(self, input_variables, target_variables, target_scale, modes,
-                 era_scales=[], inm_scales=[], mask=None, num_workers=4, fix_seed=None, with_climate=[]):
+                 era_scales=[], inm_scales=[], mask=None, num_workers=4, fix_seed=None, with_climate=[],
+                raw_era_target=False):
         self.era_time_width = max([s['tSize'] * s['tStep'] for s in era_scales], default=0)
         self.inm_time_width = max([s['tSize'] * s['tStep'] for s in inm_scales], default=0)
         self.modes = {}
         self.with_climate = with_climate
+        self.raw_era_target = raw_era_target
         for mode in modes:
             x = modes[mode].copy()
             x.setdefault("x_min", 0)
@@ -81,7 +84,8 @@ class PatchDataset(Dataset):
         elif self.mask == 'snow':
             x_size, y_size = mode['x_max'] - mode['x_min'], mode['y_max'] - mode['y_min']
             req = patcher.Request('sd', mode['x_min'], mode['y_min'], '19800101', x_size, y_size, 365, 1, 1)
-            climate = patcher.load_climate(self.context, [req])[0] > 4
+            climate = patcher.load_climate(self.context, [req])[0]
+            climate = (climate > np.log(1 + 4)) & (climate < np.log(1000))
             days = np.array([int(k) for k in mode['doy_to_years'].keys() if int(k) < 365], dtype=np.int32)
             climate = climate[days, :, :]
             idx = torch.nonzero(climate)
@@ -102,16 +106,16 @@ class PatchDataset(Dataset):
         self.lead_times = rng.randint(lead_min, max_lead + 1).tolist()
         return self
 
-    def set_full(self, mode):
+    def set_full(self, mode, skip=0, overlap=1):
         mode = self.modes[mode]
         lead_min, lead_max = mode['lead_time_range']
-        x_size = self.target_scale['xSize']
-        y_size = self.target_scale['ySize']
-        t_size = self.target_scale['tSize']
+        x_size = self.target_scale['xSize'] * self.target_scale['xyStep']
+        y_size = self.target_scale['ySize'] * self.target_scale['xyStep']
+        t_size = self.target_scale['tSize'] * self.target_scale['tStep']
 
-        x_range = range(mode['x_min'] + x_size // 2, mode['x_max'] + 1, x_size)
-        y_range = range(mode['y_min'] + y_size // 2, mode['y_max'] + 1, y_size)
-        
+        x_range = range(mode['x_min'] + x_size // 2, mode['x_max'] + 1, x_size // overlap)
+        y_range = range(mode['y_min'] + y_size // 2, mode['y_max'] + 1, y_size // overlap)
+
         start_date = datetime(1970, 1, 1) + timedelta(days=mode['t_min'])
         end_date = datetime(1970, 1, 1) + timedelta(days=mode['t_max'])
 
@@ -121,6 +125,9 @@ class PatchDataset(Dataset):
         while current <= end_date:
             current = current.replace(year=current.year + 1, month=1) if current.month == 12 else current.replace(month=current.month + 1)
             current2 = (current + relativedelta(months=1)) - timedelta(days=1)
+            if skip > 0:
+                skip -= 1
+                continue
             for lead_time in range(lead_min, lead_max + t_size, t_size):
                 l = max(lead_min, min(lead_time, lead_max, (max_allowed - current).days))
                 if len(tl) > 0 and tl[-1][1] == l:
@@ -169,14 +176,14 @@ class PatchDataset(Dataset):
 
     def get_date(self, idx, s, is_forecast):
         _, _, t1 = self.xyt[idx]
+        origin_date = datetime(1970, 1, 1) + timedelta(days=int(t1)) + relativedelta(months=1)
+        origin_date = origin_date.replace(day=1)
         if is_forecast:
             lead_time = self.lead_times[idx]
-            origin_date = datetime(1970, 1, 1) + timedelta(days=int(t1)) + relativedelta(months=1)
-            origin_date = origin_date.replace(day=1)
             date = origin_date + timedelta(days=int(lead_time - s['tSize']*s['tStep']))
             return date, origin_date
         else:
-            return datetime(1970, 1, 1) + timedelta(days=int(t1 - s['tSize']*s['tStep'])), None
+            return datetime(1970, 1, 1) + timedelta(days=int(t1 - s['tSize']*s['tStep'])), origin_date
 
     def get_variable_props(self, variable):
         if variable.endswith('_clim'):
@@ -191,11 +198,15 @@ class PatchDataset(Dataset):
     def get_era_request(self, idx, variable, s, is_target=False):
         key = f'{variable}_{s['id']}' if not is_target else variable
         x0, y0, _ = self.xyt[idx]
-        date, _ = self.get_date(idx, s, is_target)
+        date, origin_date = self.get_date(idx, s, is_target and not self.raw_era_target)
 
         if variable in ['year', 'year_norm', 'day', 'cos_day', 'sin_day']:
             dates = [date + timedelta(days=int(i*s['tStep'])) for i in range(s['tSize'])]
             return self.get_time_variable(dates, variable), key, is_target, False, False
+
+        if variable == 'lead_time':
+            days = (date - origin_date).days
+            return torch.tensor([days + i*s['tStep'] for i in range(s['tSize'])], dtype=torch.float32), key, is_target, False, False
 
         x = (x0 - s['xSize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixX' not in s else s['fixX']
         y = (y0 - s['ySize'] * s['xyStep'] // 2) // s['xyStep'] * s['xyStep'] if 'fixY' not in s else s['fixY']
@@ -285,3 +296,51 @@ class PatchDataset(Dataset):
 
         return inputs, targets
 
+@saveable
+class PreparedTokensDataset:
+    def __init__(self, root, max_epochs=10, use_cache=False, test_file='test.pt'):
+        self.root = Path(root)
+        self.mode = 'train'
+        self.test_file = test_file
+        self.seed = 0
+        self.max_epochs = max_epochs
+        self.files = {}
+        self.use_cache = use_cache
+        self.data = None
+        self.loader = SkipDataLoader(self)
+        self._load()
+
+    def set_mode(self, mode):
+        if mode == self.mode:
+            return
+        self.mode = mode
+        self._load()
+
+    def set_seed(self, seed):
+        if seed == self.seed or self.mode == 'test':
+            return
+        self.seed = (seed % self.max_epochs)
+        self._load()
+
+    def _path(self):
+        if self.mode == 'test':
+            return self.root / self.test_file
+        return self.root / f'train{(self.seed + 1):03d}.pt'
+
+    def _load(self):
+        path = self._path()
+        if self.use_cache and path in self.files:
+            self.data = self.files[path]
+            return
+        self.data = torch.load(path, map_location='cpu', weights_only=False)
+        if self.use_cache:
+            self.files[path] = self.data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        batch = self.data[idx]
+        y = batch['y']
+        x = {k: v for k, v in batch.items() if k != 'y'}
+        return x, y
